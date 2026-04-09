@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐰 토끼의 동전 받기</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="gc">
+  <div id="sky"></div>
+  <div id="moon"></div>
+
+  <!-- 숲 배경 -->
+  <svg id="forest" viewBox="0 0 1400 600" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
+    <g opacity=".38">
+      <polygon points="60,570 125,340 190,570" fill="#163312"/>
+      <polygon points="50,570 125,385 200,570" fill="#1a3d14"/>
+      <rect x="113" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="240,570 315,305 390,570" fill="#1a3d14"/>
+      <polygon points="230,570 315,348 400,570" fill="#163312"/>
+      <rect x="303" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="460,570 535,318 610,570" fill="#1e4618"/>
+      <polygon points="450,570 535,362 620,570" fill="#1a3d14"/>
+      <rect x="523" y="548" width="22" height="42" fill="#12290e"/>
+      <polygon points="680,570 755,295 830,570" fill="#163312"/>
+      <polygon points="670,570 755,338 840,570" fill="#1e4618"/>
+      <rect x="743" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="880,570 955,325 1030,570" fill="#1a3d14"/>
+      <polygon points="870,570 955,368 1040,570" fill="#163312"/>
+      <rect x="943" y="548" width="22" height="42" fill="#12290e"/>
+      <polygon points="1100,570 1175,308 1250,570" fill="#1e4618"/>
+      <polygon points="1090,570 1175,352 1260,570" fill="#1a3d14"/>
+      <rect x="1163" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="1300,570 1370,335 1440,570" fill="#163312"/>
+      <polygon points="1290,570 1370,378 1450,570" fill="#1e4618"/>
+      <rect x="1358" y="548" width="22" height="42" fill="#12290e"/>
+    </g>
+    <g opacity=".92">
+      <polygon points="-10,592 68,358 146,592" fill="#2a6020"/>
+      <polygon points="-20,592 68,408 156,592" fill="#347528"/>
+      <rect x="56" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="165,592 252,328 339,592" fill="#3d8c30"/>
+      <polygon points="155,592 252,376 349,592" fill="#2a6020"/>
+      <rect x="240" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="375,592 458,346 541,592" fill="#2a6020"/>
+      <polygon points="365,592 458,392 551,592" fill="#347528"/>
+      <rect x="446" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="605,592 696,310 787,592" fill="#3d8c30"/>
+      <polygon points="595,592 696,358 797,592" fill="#2a6020"/>
+      <rect x="684" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="835,592 924,338 1013,592" fill="#2a6020"/>
+      <polygon points="825,592 924,386 1023,592" fill="#347528"/>
+      <rect x="912" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="1065,592 1154,312 1243,592" fill="#3d8c30"/>
+      <polygon points="1055,592 1154,360 1253,592" fill="#2a6020"/>
+      <rect x="1142" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="1278,592 1360,342 1442,592" fill="#2a6020"/>
+      <polygon points="1268,592 1360,390 1452,592" fill="#347528"/>
+      <rect x="1348" y="568" width="24" height="54" fill="#1c3e14"/>
+    </g>
+    <ellipse cx="140"  cy="592" rx="58" ry="20" fill="#347528" opacity=".65"/>
+    <ellipse cx="410"  cy="592" rx="72" ry="23" fill="#3d8c30" opacity=".55"/>
+    <ellipse cx="740"  cy="592" rx="63" ry="20" fill="#347528" opacity=".65"/>
+    <ellipse cx="1040" cy="592" rx="68" ry="22" fill="#3d8c30" opacity=".55"/>
+    <ellipse cx="1340" cy="592" rx="58" ry="19" fill="#347528" opacity=".65"/>
+  </svg>
+
+  <div id="ground"></div>
+  <canvas id="cv"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hb"><div class="hl">점수</div><div class="hv" id="elScore">0</div></div>
+    <div class="hb"><div class="hl">💣 목숨</div><div id="lifeBar"><span class="lh" id="lh0">💚</span><span class="lh" id="lh1">💚</span><span class="lh" id="lh2">💚</span></div></div>
+    <div class="hb"><div class="hl">최고기록</div><div class="hv" id="elBest">0</div></div>
+  </div>
+
+  <div id="hint">← → 이동 &nbsp;|&nbsp; 🪙 동전 받기 &nbsp;💣 폭탄 3번 = 게임오버</div>
+  <div id="flash"></div>
+
+  <!-- 모바일 버튼 -->
+  <div id="mctl">
+    <div class="mb" id="mbl"><span>◀</span><span class="mbl">왼쪽</span></div>
+    <div class="mb" id="mbr"><span>▶</span><span class="mbl">오른쪽</span></div>
+  </div>
+
+  <!-- 시작 화면 -->
+  <div class="screen" id="startScreen">
+    <h1>🐰 토끼의 동전 받기</h1>
+    <p>바구니로 동전을 받아 점수를 모으세요!</p>
+    <p class="note">💣 폭탄을 3번 받으면 게임 오버 | 점수가 높을수록 빨라져요</p>
+    <div class="btn-row">
+      <button class="btn" id="btnStart">게임 시작!</button>
+      <button id="btnScore">🏆 스코어</button>
+    </div>
+  </div>
+
+  <!-- 스코어보드 화면 -->
+  <div class="screen" id="sbScreen">
+    <h2>🏆 스코어보드</h2>
+    <table id="sbTable">
+      <thead><tr><th>순위</th><th>이름</th><th>점수</th></tr></thead>
+      <tbody id="sbBody"></tbody>
+    </table>
+    <button id="btnSbBack">← 돌아가기</button>
+  </div>
+
+  <!-- 게임오버 화면 -->
+  <div class="screen" id="overScreen">
+    <div id="overTop">
+      <h2>💥 게임 종료!</h2>
+      <div class="go-sc" id="elGoScore"></div>
+      <div class="go-bst" id="elGoBest"></div>
+    </div>
+    <div id="overSbWrap">
+      <h3>🏆 전체 순위</h3>
+      <table id="overSbTable">
+        <thead><tr><th>순위</th><th>이름</th><th>점수</th></tr></thead>
+        <tbody id="overSbBody"></tbody>
+      </table>
+    </div>
+    <div id="initialWrap">
+      <div class="my-rank" id="myRankText"></div>
+      <p>이니셜 3글자를 입력해 등록하세요!</p>
+      <div class="initial-input-row">
+        <input class="init-char" id="ic0" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+        <input class="init-char" id="ic1" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+        <input class="init-char" id="ic2" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+      </div>
+      <button id="btnSubmit">등록하기 ✅</button>
+    </div>
+    <div class="over-btn-row">
+      <button class="btn" id="btnRetry">다시 하기 🎮</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
