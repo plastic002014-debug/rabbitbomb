@@ -20,7 +20,7 @@ for (let i = 0; i < 6; i++) {
 /* ─── 캔버스 ─── */
 const cv  = document.getElementById('cv');
 const ctx = cv.getContext('2d');
-let W, H, GY;
+let W, H, GY; // GY = ground top y
 
 function resize() {
   W = cv.width  = window.innerWidth;
@@ -33,10 +33,18 @@ window.addEventListener('resize', resize);
 /* ─── 게임 변수 ─── */
 let score, best = 0, lives;
 let running = false;
-let items = [], sparks = [], pops = [];
+let items = [], sparks = [], pops = [], fireworks = [];
 let spawnT = 0, elapsed = 0;
 let lastTs = 0;
 const keys = {};
+
+// 콤보
+let combo = 0, comboTimer = 0;
+// 보너스 타임
+let bonusActive = false, bonusTimer = 0;
+let lastBonusTier = 0;  // 이미 발동한 티어 기록
+// 기록 갱신
+let newRecord = false, recordTimer = 0;
 
 /* ─── DOM 참조 ─── */
 const elScore   = document.getElementById('elScore');
@@ -49,18 +57,25 @@ const flash     = document.getElementById('flash');
 
 /* ─── 토끼 오브젝트 ─── */
 const bunny = {
-  W: 54, H: 66,
+  W: 54, H: 70,
   x: 0,  y: 0,
   spd: 7,
   dir: 1,
-  legT: 0, earT: 0, blinkT: 0, blink: false,
-  BW: 78, BH: 30,
+  legT: 0,
+  earT: 0,
+  blinkT: 0,
+  blink: false,
+  face: 'normal',   // 'normal' | 'happy' | 'sad'
+  faceTimer: 0,
+  BW: 80,
+  BH: 32,
   bx() { return this.x + this.W / 2; },
-  by() { return this.y - 52; },
+  by() { return this.y - 10; },   // 바구니 앞으로 들기 → y 조정
   reset() {
     this.x = W / 2 - this.W / 2;
     this.y = GY - this.H;
     this.legT = 0; this.earT = 0; this.blinkT = 0; this.blink = false;
+    this.face = 'normal'; this.faceTimer = 0;
   }
 };
 
@@ -73,21 +88,53 @@ const COINS = [
 
 function spawnItem() {
   const x = 50 + Math.random() * (W - 100);
-  const tier  = Math.min(Math.floor(score / 30), 15);
-  const spd   = 1.5 + tier * 0.5;
-  const bombP = 0.20 + tier * 0.04;
+
+  // 점수 기반 난이도 (부드럽게 단계적으로 상승)
+  // 0점~무한 / 구간별 체감 설계:
+  //   0~ 50점: 입문  (아주 느리고 폭탄 적음)
+  //  50~150점: 초급  (서서히 빨라짐)
+  // 150~300점: 중급  (체감 빠름, 폭탄 증가)
+  // 300~500점: 고급  (꽤 빠름)
+  // 500점 이상: 최고  (최대 속도 유지)
+  const s = Math.min(score, 500);
+  const phase = s / 500;                      // 0.0 ~ 1.0
+  const spd   = 1.2 + phase * 3.0;           // 속도: 1.2 → 4.2
+  const bombP = 0.06 + phase * 0.22;         // 폭탄확률: 6% → 28%
+
+  // 보너스 타임: 10원짜리만 폭탄 없이, 빠른 속도감
+  if (bonusActive) {
+    const c = COINS[2];
+    items.push({
+      kind: 'coin', x, y: -20, r: c.r,
+      vy: 6 + Math.random() * 2.5,
+      spin: Math.random() * Math.PI * 2,
+      spinV: 0.05 + Math.random() * 0.04,
+      value: c.value, col: c.col, shine: c.shine
+    });
+    return;
+  }
+
+  // 목숨 아이템 (100점 이상, 목숨 부족 시 10% 확률)
+  if (score >= 100 && lives < 3 && Math.random() < 0.10) {
+    items.push({ kind: 'life', x, y: -20, r: 16, vy: 1.8 + Math.random() * 0.6, spin: 0 });
+    return;
+  }
 
   if (Math.random() < bombP) {
     items.push({
       kind: 'bomb', x, y: -28, r: 20,
-      vy: (3.0 + Math.random() * 1.2) * spd,
-      rot: 0
+      vy: (1.6 + Math.random() * 0.8) * spd, rot: 0
     });
   } else {
-    const c = COINS[Math.floor(Math.random() * (Math.random() < .5 ? 1 : COINS.length))];
+    // 점수가 높을수록 고액 동전 비중 증가
+    const r = Math.random();
+    const coinIdx = score < 80  ? (r < 0.55 ? 0 : r < 0.85 ? 1 : 2)   // 55/30/15
+                  : score < 200 ? (r < 0.38 ? 0 : r < 0.72 ? 1 : 2)   // 38/34/28
+                  :               (r < 0.25 ? 0 : r < 0.55 ? 1 : 2);  // 25/30/45
+    const c = COINS[coinIdx];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: (3.2 + Math.random() * 1.2) * spd,
+      vy: (1.6 + Math.random() * 0.8) * spd,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
@@ -95,15 +142,18 @@ function spawnItem() {
   }
 }
 
-/* ─── 충돌 판정 ─── */
+/* ─── 충돌 판정 (토끼 전체 영역) ─── */
 function caught(item) {
-  const bx = bunny.bx(), by = bunny.by();
-  const hw = bunny.BW / 2;
+  // 토끼 전체 바운딩박스 (귀 끝부터 발끝, 양옆 전체)
+  const left  = bunny.x - 6;
+  const right = bunny.x + bunny.W + 6;
+  const top   = bunny.y - 42;   // 귀 끝 포함
+  const bot   = bunny.y + bunny.H;
   return (
-    item.x > bx - hw &&
-    item.x < bx + hw &&
-    item.y > by - 10 &&
-    item.y < by + bunny.BH + 5
+    item.x + item.r > left &&
+    item.x - item.r < right &&
+    item.y + item.r > top &&
+    item.y - item.r < bot
   );
 }
 
@@ -137,11 +187,13 @@ function doFlash() {
 function update(dt) {
   if (!running) return;
 
+  // 이동
   let moving = false;
   if (keys.left)  { bunny.x -= bunny.spd; bunny.dir = -1; moving = true; }
   if (keys.right) { bunny.x += bunny.spd; bunny.dir =  1; moving = true; }
   bunny.x = Math.max(0, Math.min(W - bunny.W, bunny.x));
 
+  // 애니메이션
   if (moving) bunny.legT += 0.22;
   bunny.earT += 0.1;
   bunny.blinkT++;
@@ -150,12 +202,42 @@ function update(dt) {
     setTimeout(() => { bunny.blink = false; bunny.blinkT = 0; }, 110);
   }
 
+  // 보너스 타임 체크 — 20콤보 달성 시 발동
+  if (!bonusActive && combo > 0 && combo % 20 === 0 && lastBonusTier !== combo) {
+    bonusActive = true;
+    bonusTimer = 300;
+    lastBonusTier = combo;
+    combo = 0; comboTimer = 0; // 보너스 진입 시 콤보 초기화 (보너스 중 콤보 누적 방지)
+    items = [];
+    sfxBonus();
+    addPop(W / 2, H / 2, '🎉 보너스 타임!', '#ffe066');
+    addPop(W / 2, H / 2 + 44, '🔥 20콤보 달성!', '#ff9900');
+  }
+
+  // 보너스 타임 카운트다운
+  if (bonusActive) {
+    bonusTimer -= 1;
+    if (bonusTimer <= 0) {
+      bonusActive = false;
+      combo = 0; comboTimer = 0; // 보너스 끝나면 콤보 리셋 → 새로 20콤보 도전
+      stopBonusBgm();
+    }
+  }
+
+  // 스폰
   spawnT += dt;
   elapsed += dt / 1000;
-  const tier2    = Math.min(Math.floor(score / 30), 15);
-  const interval = Math.max(250, 1200 - tier2 * 65);
-  if (spawnT >= interval) { spawnItem(); spawnItem(); spawnT = 0; }
+  // 점수가 높을수록 스폰 간격 짧아짐: 0점=1.4초 → 500점=0.55초
+  const spawnInterval = bonusActive
+    ? 250
+    : Math.max(550, 1400 - Math.min(score, 500) * 1.7);
+  if (spawnT >= spawnInterval) {
+    spawnItem();
+    if (bonusActive) spawnItem();
+    spawnT = 0;
+  }
 
+  // 아이템 충돌
   items = items.filter(it => {
     it.y += it.vy;
     if (caught(it)) {
@@ -165,13 +247,30 @@ function update(dt) {
         addSparks(it.x, it.y, it.shine, 12);
         addPop(it.x, it.y - 20, '+' + it.value, it.shine);
         sfxCoin();
-      } else {
+        bunny.face = 'happy'; bunny.faceTimer = 50;
+
+        // 콤보 — 보너스 타임 중에는 콤보 누적 제외
+        if (!bonusActive) {
+          combo++;
+          comboTimer = 180;
+          if (combo > 0 && combo % 10 === 0) {
+            score += 10;
+            elScore.textContent = score;
+            addPop(W / 2, H / 2 - 40, `🔥 ${combo}콤보!!`, '#ff9900');
+            addPop(W / 2, H / 2, '+10 보너스!', '#ffe066');
+            sfxCombo();
+          }
+        }
+
+      } else if (it.kind === 'bomb') {
         lives--;
+        combo = 0; comboTimer = 0; lastBonusTier = 0;
         refreshLives();
         doFlash();
         addSparks(it.x, it.y, '#ff5500', 20);
         addPop(it.x, it.y - 20, '-♥', '#ff6b6b');
         sfxBomb();
+        bunny.face = 'sad'; bunny.faceTimer = 70;
         try {
           if (navigator.vibrate) {
             if (lives <= 0)       navigator.vibrate([100, 60, 100, 60, 200]);
@@ -180,27 +279,102 @@ function update(dt) {
           }
         } catch(e) {}
         if (lives <= 0) { setTimeout(endGame, 250); }
+
+      } else if (it.kind === 'life') {
+        if (lives < 3) {
+          lives++;
+          refreshLives();
+          addSparks(it.x, it.y, '#00ff88', 18);
+          addPop(it.x, it.y - 20, '+♥', '#00ff88');
+          sfxLife();
+          bunny.face = 'happy'; bunny.faceTimer = 60;
+        }
       }
       return false;
     }
     return it.y < GY + 50;
   });
 
+  // 콤보 타이머
+  if (comboTimer > 0) { comboTimer--; if (comboTimer === 0) combo = 0; }
+
+  // 표정 타이머
+  if (bunny.faceTimer > 0) {
+    bunny.faceTimer--;
+    if (bunny.faceTimer === 0) bunny.face = 'normal';
+  }
+
+  // 기록 갱신 체크 — 이전 기록이 있을 때만 노티
+  if (score > best && !newRecord && score > 0 && best > 0) {
+    newRecord = true;
+    recordTimer = 220;
+    spawnFireworks();
+  }
+  if (recordTimer > 0) { recordTimer--; }
+
+  // 파티클
   sparks.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life -= p.d; });
   sparks = sparks.filter(p => p.life > 0);
   pops.forEach(p => { p.y += p.vy; p.life -= 0.022; });
   pops = pops.filter(p => p.life > 0);
+
+  // 폭죽
+  fireworks.forEach(f => {
+    f.particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.06;
+      p.vx *= 0.97; p.life -= 0.018;
+    });
+    f.particles = f.particles.filter(p => p.life > 0);
+  });
+  fireworks = fireworks.filter(f => f.particles.length > 0);
 }
 
 /* ─── 그리기 ─── */
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
+  // 보너스 타임 배경 반짝임 (나이트클럽)
+  if (bonusActive) {
+    const t = Date.now();
+    const colors = ['#ff0088','#00ffcc','#ffff00','#ff6600','#aa00ff','#00aaff'];
+    const col = colors[Math.floor(t / 120) % colors.length];
+    ctx.globalAlpha = 0.13 + Math.sin(t * 0.01) * 0.07;
+    ctx.fillStyle = col;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+
+    // 보너스 타임 문구
+    const pulse = 1 + Math.sin(t * 0.008) * 0.06;
+    ctx.save();
+    ctx.translate(W / 2, 90);
+    ctx.scale(pulse, pulse);
+    ctx.font = 'bold 32px Jua, cursive';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = col;
+    ctx.shadowColor = col; ctx.shadowBlur = 18;
+    ctx.fillText('🎉 보너스 타임!', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // 폭죽
+  fireworks.forEach(f => {
+    f.particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = p.col; ctx.fill();
+    });
+  });
+  ctx.globalAlpha = 1;
+
+  // 아이템
   items.forEach(it => {
     if (it.kind === 'coin') drawCoin(it);
-    else drawBomb(it);
+    else if (it.kind === 'bomb') drawBomb(it);
+    else if (it.kind === 'life') drawLife(it);
   });
 
+  // 파티클
   sparks.forEach(p => {
     ctx.globalAlpha = p.life;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
@@ -208,8 +382,10 @@ function draw() {
   });
   ctx.globalAlpha = 1;
 
+  // 토끼
   drawBunny();
 
+  // 팝업 텍스트
   pops.forEach(p => {
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.col;
@@ -220,98 +396,190 @@ function draw() {
     ctx.shadowBlur = 0;
   });
   ctx.globalAlpha = 1;
+
+  // 기록 갱신 배너
+  if (newRecord && recordTimer > 0) {
+    const alpha = Math.min(1, recordTimer / 40) * Math.min(1, (recordTimer) / 30);
+    const pulse = 1 + Math.sin(Date.now() * 0.012) * 0.04;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, recordTimer / 50);
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(pulse, pulse);
+    // 배경
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 110, 0, Math.PI*2);
+    ctx.fill();
+    // 텍스트
+    ctx.font = 'bold 28px Jua, cursive';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffe066';
+    ctx.shadowColor = '#ffaa00'; ctx.shadowBlur = 20;
+    ctx.fillText('🏆 기록 갱신!', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
 }
 
 /* ─── 토끼 그리기 ─── */
 function drawBunny() {
   const b = bunny;
   const cx = b.x + b.W / 2;
-  const cy = b.y + b.H / 2;
+  const by = b.y + b.H;        // 발 y
   const moving = keys.left || keys.right;
-  const leg = moving ? Math.sin(b.legT) * 11 : 0;
+  const leg = moving ? Math.sin(b.legT) * 10 : 0;
+  const face = b.face;
 
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(b.dir, 1);
+  ctx.translate(cx, by);       // 발 기준
 
-  ctx.beginPath(); ctx.ellipse(0, b.H/2 - 2, 20, 6, 0, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fill();
+  // ── 그림자
+  ctx.beginPath(); ctx.ellipse(0, -2, 24, 7, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill();
 
-  ctx.save(); ctx.translate(0, 14); ctx.rotate((leg - 6) * Math.PI/180);
-  ctx.beginPath();
-  ctx.arc(0, 6, 6, Math.PI, Math.PI*1.5);
-  ctx.arc(0, 6, 6, Math.PI*1.5, 0);
-  ctx.arc(0, 14, 6, 0, Math.PI*.5);
-  ctx.arc(0, 14, 6, Math.PI*.5, Math.PI);
-  ctx.closePath();
+  // ── 다리 (뒤쪽)
+  ctx.save(); ctx.translate(-7, -14); ctx.rotate((leg - 5) * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, 9, 5, 12, 0, 0, Math.PI*2);
   ctx.fillStyle = '#ede4da'; ctx.fill(); ctx.restore();
 
-  ctx.beginPath(); ctx.ellipse(0, 8, 16, 20, 0, 0, Math.PI*2);
+  // ── 다리 (앞쪽)
+  ctx.save(); ctx.translate(7, -14); ctx.rotate((leg + 5) * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, 9, 5, 12, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#f0e8de'; ctx.fill(); ctx.restore();
+
+  // ── 몸통 (작고 통통)
+  ctx.beginPath(); ctx.ellipse(0, -26, 15, 18, 0, 0, Math.PI*2);
   ctx.fillStyle = '#f5f0ea'; ctx.fill();
-  ctx.strokeStyle = '#d8cfc4'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.strokeStyle = '#ddd0c4'; ctx.lineWidth = 1.2; ctx.stroke();
 
-  ctx.beginPath(); ctx.ellipse(2, 10, 9, 13, 0.1, 0, Math.PI*2);
-  ctx.fillStyle = '#fffdf8'; ctx.fill();
+  // ── 배
+  ctx.beginPath(); ctx.ellipse(1, -25, 8, 12, 0.1, 0, Math.PI*2);
+  ctx.fillStyle = '#fffcf7'; ctx.fill();
 
-  ctx.beginPath(); ctx.arc(-14, 8, 7, 0, Math.PI*2);
+  // ── 꼬리
+  ctx.beginPath(); ctx.arc(-15, -26, 6, 0, Math.PI*2);
   ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.strokeStyle = '#e8e0d8'; ctx.lineWidth = 1; ctx.stroke();
 
-  const armAngle = 65;
-  [[-11, -2, -armAngle], [11, -2, armAngle]].forEach(([ax, ay, ang]) => {
-    ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang * Math.PI/180);
-    ctx.beginPath();
-    ctx.arc(0, 4, 4, Math.PI, 0);
-    ctx.arc(0, 13, 4, 0, Math.PI);
-    ctx.closePath();
-    ctx.fillStyle = '#ede4da'; ctx.fill(); ctx.restore();
-  });
+  // ── 팔: 앞으로 내밀어 바구니 들기
+  // 왼팔
+  ctx.save(); ctx.translate(-10, -32);
+  ctx.rotate(30 * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, 8, 5, 10, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#ede4da'; ctx.fill(); ctx.restore();
+  // 오른팔
+  ctx.save(); ctx.translate(10, -32);
+  ctx.rotate(-30 * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, 8, 5, 10, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#ede4da'; ctx.fill(); ctx.restore();
 
-  ctx.beginPath(); ctx.ellipse(3, -14, 13, 14, 0, 0, Math.PI*2);
+  // ── 머리 (크게!)
+  const hY = -54;
+  ctx.beginPath(); ctx.ellipse(0, hY, 22, 24, 0, 0, Math.PI*2);
   ctx.fillStyle = '#f5f0ea'; ctx.fill();
-  ctx.strokeStyle = '#d8cfc4'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.strokeStyle = '#ddd0c4'; ctx.lineWidth = 1.3; ctx.stroke();
 
-  const wig = Math.sin(b.earT) * 4;
-  [[-4, -23, -7 + wig], [11, -25, 5 - wig * .5]].forEach(([ex, ey, rot]) => {
-    ctx.save(); ctx.translate(ex, ey); ctx.rotate(rot * Math.PI/180);
-    ctx.beginPath(); ctx.ellipse(0, -11, 5, 14, 0, 0, Math.PI*2);
-    ctx.fillStyle = '#f5f0ea'; ctx.fill();
-    ctx.strokeStyle = '#d8cfc4'; ctx.lineWidth = 1; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(0, -11, 2.5, 10, 0, 0, Math.PI*2);
-    ctx.fillStyle = '#f8c8cc'; ctx.fill();
-    ctx.restore();
-  });
+  // ── 귀
+  const wig = Math.sin(b.earT) * 5;
+  // 왼쪽 귀
+  ctx.save(); ctx.translate(-11, hY - 18); ctx.rotate((-12 + wig) * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, -14, 7, 18, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#f5f0ea'; ctx.fill();
+  ctx.strokeStyle = '#ddd0c4'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, -14, 4, 13, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#f9c8d0'; ctx.fill();
+  ctx.restore();
+  // 오른쪽 귀
+  ctx.save(); ctx.translate(11, hY - 20); ctx.rotate((10 - wig * .5) * Math.PI/180);
+  ctx.beginPath(); ctx.ellipse(0, -14, 7, 18, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#f5f0ea'; ctx.fill();
+  ctx.strokeStyle = '#ddd0c4'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, -14, 4, 13, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#f9c8d0'; ctx.fill();
+  ctx.restore();
 
-  const ey0 = -18;
-  if (b.blink) {
-    ctx.strokeStyle = '#555'; ctx.lineWidth = 1.8;
-    ctx.beginPath(); ctx.moveTo(-3, ey0); ctx.lineTo(1, ey0 + 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(7, ey0);  ctx.lineTo(11, ey0 + 2); ctx.stroke();
-  } else {
-    [[-1, ey0], [9, ey0]].forEach(([ex, eey]) => {
-      ctx.beginPath(); ctx.arc(ex, eey, 3, 0, Math.PI*2);
-      ctx.fillStyle = '#2a2a2a'; ctx.fill();
-      ctx.beginPath(); ctx.arc(ex + 1, eey - 1, 1.1, 0, Math.PI*2);
-      ctx.fillStyle = '#fff'; ctx.fill();
-    });
-  }
-  ctx.beginPath(); ctx.arc(4, ey0 + 6, 2, 0, Math.PI*2);
-  ctx.fillStyle = '#ffb3c6'; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(2, ey0+8); ctx.quadraticCurveTo(4, ey0+12, 7, ey0+8);
-  ctx.strokeStyle = '#c08080'; ctx.lineWidth = 1.3; ctx.stroke();
-  ctx.globalAlpha = .32;
-  ctx.beginPath(); ctx.arc(-3, ey0+4, 4, 0, Math.PI*2); ctx.fillStyle = '#ffb3c6'; ctx.fill();
-  ctx.beginPath(); ctx.arc(12, ey0+4, 4, 0, Math.PI*2); ctx.fill();
+  // ── 볼 홍조
+  ctx.globalAlpha = .38;
+  ctx.beginPath(); ctx.arc(-13, hY + 6, 7, 0, Math.PI*2); ctx.fillStyle = '#ffb3c6'; ctx.fill();
+  ctx.beginPath(); ctx.arc(13,  hY + 6, 7, 0, Math.PI*2); ctx.fill();
   ctx.globalAlpha = 1;
 
+  // ── 눈
+  const eyY = hY - 4;
+  if (face === 'happy') {
+    // 웃는 눈 (U자 반전 = 초승달)
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(-8, eyY + 2, 5, Math.PI, 0); ctx.stroke();
+    ctx.beginPath(); ctx.arc( 8, eyY + 2, 5, Math.PI, 0); ctx.stroke();
+  } else if (face === 'sad') {
+    // 우는 눈 (눈물 + 찡그림)
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(-8, eyY - 2, 5, 0, Math.PI); ctx.stroke(); // 뒤집힌 호
+    ctx.beginPath(); ctx.arc( 8, eyY - 2, 5, 0, Math.PI); ctx.stroke();
+    // 눈물방울
+    ctx.fillStyle = '#88ccff';
+    ctx.beginPath(); ctx.arc(-8, eyY + 7, 3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 8, eyY + 7, 3, 0, Math.PI*2); ctx.fill();
+  } else if (b.blink) {
+    ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-12, eyY); ctx.lineTo(-4, eyY + 1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4,   eyY); ctx.lineTo(12, eyY + 1); ctx.stroke();
+  } else {
+    // 기본 눈 (동그란 반짝이 눈)
+    [[-8, eyY],[8, eyY]].forEach(([ex, ey]) => {
+      ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI*2);
+      ctx.fillStyle = '#2a2a2a'; ctx.fill();
+      ctx.beginPath(); ctx.arc(ex - 1, ey - 1.5, 2, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.beginPath(); ctx.arc(ex + 2, ey + 1.5, 1, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fill();
+    });
+  }
+
+  // ── 코
+  ctx.beginPath(); ctx.ellipse(0, eyY + 9, 4, 3, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#ffb3c6'; ctx.fill();
+  ctx.strokeStyle = '#e8a0b8'; ctx.lineWidth = .8; ctx.stroke();
+
+  // ── 입
+  if (face === 'happy') {
+    ctx.beginPath();
+    ctx.moveTo(-7, eyY + 14);
+    ctx.quadraticCurveTo(0, eyY + 22, 7, eyY + 14);
+    ctx.strokeStyle = '#c07080'; ctx.lineWidth = 2; ctx.stroke();
+    // 웃음 보조선
+    ctx.beginPath(); ctx.moveTo(-7, eyY+14); ctx.lineTo(-10, eyY+11);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(7, eyY+14); ctx.lineTo(10, eyY+11);
+    ctx.stroke();
+  } else if (face === 'sad') {
+    ctx.beginPath();
+    ctx.moveTo(-7, eyY + 18);
+    ctx.quadraticCurveTo(0, eyY + 12, 7, eyY + 18);
+    ctx.strokeStyle = '#c07080'; ctx.lineWidth = 2; ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-5, eyY + 14);
+    ctx.quadraticCurveTo(0, eyY + 18, 5, eyY + 14);
+    ctx.strokeStyle = '#c07080'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+
   ctx.restore();
-  drawBasket(cx, b.y - 52);
+
+  // ── 바구니 (앞으로 내밀어 들기: 몸통 앞쪽, 절대 좌표)
+  const bskX = cx + b.dir * 14;   // 방향에 따라 살짝 앞으로
+  const bskY = by - 36;
+  drawBasket(bskX, bskY, b.dir);
 }
 
-function drawBasket(cx, topY) {
+function drawBasket(cx, topY, dir) {
   const bw = bunny.BW, bh = bunny.BH;
+  dir = dir || 1;
   ctx.save();
   ctx.translate(cx, topY);
+  ctx.rotate(dir * -18 * Math.PI/180);   // 앞으로 약간 기울임
 
+  // 몸체 (사다리꼴)
   ctx.beginPath();
   ctx.moveTo(-bw/2,     0);
   ctx.lineTo( bw/2,     0);
@@ -323,6 +591,7 @@ function drawBasket(cx, topY) {
   ctx.fillStyle = g; ctx.fill();
   ctx.strokeStyle = '#6b4404'; ctx.lineWidth = 2; ctx.stroke();
 
+  // 격자 무늬
   ctx.save(); ctx.clip();
   ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1.4;
   for (let xi = -bw/2; xi < bw/2; xi += 11) {
@@ -333,9 +602,11 @@ function drawBasket(cx, topY) {
   }
   ctx.restore();
 
+  // 윗테두리
   ctx.beginPath(); ctx.moveTo(-bw/2, 0); ctx.lineTo(bw/2, 0);
   ctx.strokeStyle = '#e8a820'; ctx.lineWidth = 4.5; ctx.stroke();
 
+  // 손잡이
   ctx.beginPath(); ctx.arc(0, -3, bw * 0.33, Math.PI, 0);
   ctx.strokeStyle = '#6b4404'; ctx.lineWidth = 5; ctx.stroke();
   ctx.beginPath(); ctx.arc(0, -3, bw * 0.33, Math.PI, 0);
@@ -362,6 +633,7 @@ function drawCoin(c) {
     ctx.fillText(c.value, 0, 1);
     ctx.globalAlpha = 1;
   }
+  // 광택
   ctx.beginPath(); ctx.arc(-c.r*.26, -c.r*.28, c.r*.28, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fill();
   ctx.restore();
@@ -372,20 +644,24 @@ function drawBomb(b) {
   b.rot += 0.045;
   ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
 
+  // 몸체
   ctx.beginPath(); ctx.arc(0, 2, b.r, 0, Math.PI*2);
   const g = ctx.createRadialGradient(-b.r*.3, -b.r*.15, 0, 0, 2, b.r);
   g.addColorStop(0, '#606060'); g.addColorStop(1, '#111');
   ctx.fillStyle = g; ctx.fill();
   ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5; ctx.stroke();
 
+  // 하이라이트
   ctx.beginPath(); ctx.arc(-b.r*.28, -b.r*.12, b.r*.24, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.fill();
 
+  // 도화선
   ctx.beginPath();
   ctx.moveTo(0, -b.r);
   ctx.bezierCurveTo(8, -b.r-10, 14, -b.r-5, 10, -b.r-19);
   ctx.strokeStyle = '#8b6914'; ctx.lineWidth = 2.5; ctx.stroke();
 
+  // 불꽃 (도화선 끝)
   const ff = Math.sin(Date.now() * .03) * 2.5;
   ctx.beginPath(); ctx.arc(10, -b.r-19+ff, 5.5, 0, Math.PI*2);
   ctx.fillStyle = '#ff8800'; ctx.fill();
@@ -397,9 +673,105 @@ function drawBomb(b) {
   ctx.restore();
 }
 
-/* ─── 오디오 엔진 ─── */
+/* ─── 목숨 아이템 그리기 ─── */
+function drawLife(it) {
+  it.spin = (it.spin || 0) + 0.06;
+  const pulse = 1 + Math.sin(it.spin * 2) * 0.08;
+  ctx.save();
+  ctx.translate(it.x, it.y);
+  ctx.scale(pulse, pulse);
+  // 하트 모양
+  ctx.beginPath();
+  ctx.moveTo(0, 6);
+  ctx.bezierCurveTo(-18, -8, -22, 10, 0, 22);
+  ctx.bezierCurveTo(22, 10, 18, -8, 0, 6);
+  ctx.fillStyle = '#ff4466';
+  ctx.shadowColor = '#ff88aa'; ctx.shadowBlur = 14;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // 하이라이트
+  ctx.beginPath(); ctx.arc(-6, 2, 4, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fill();
+  ctx.restore();
+}
+
+/* ─── 폭죽 ─── */
+function spawnFireworks() {
+  const colors = ['#ffe066','#ff6b6b','#00ffcc','#ff88ff','#66aaff','#ffaa44'];
+  for (let b = 0; b < 6; b++) {
+    const fx = W * 0.15 + Math.random() * W * 0.7;
+    const fy = H * 0.1 + Math.random() * H * 0.35;
+    const col = colors[b % colors.length];
+    const particles = [];
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const s = 2 + Math.random() * 5;
+      particles.push({
+        x: fx, y: fy,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1,
+        r: 2 + Math.random() * 3,
+        col, life: 1
+      });
+    }
+    fireworks.push({ particles });
+  }
+}
+
+/* ─── 효과음 추가 ─── */
+function sfxCombo() {
+  const ac = getAudioCtx();
+  const g = ac.createGain(); g.connect(ac.destination);
+  [523,659,784,1046].forEach((f,i) => playTone(f,'square', ac.currentTime+i*0.07, 0.15, 0.18, ac, g));
+}
+function sfxLife() {
+  const ac = getAudioCtx();
+  const g = ac.createGain(); g.connect(ac.destination);
+  [392,523,659,784].forEach((f,i) => playTone(f,'sine', ac.currentTime+i*0.08, 0.18, 0.2, ac, g));
+}
+
+let bonusBgmPlaying = false, bonusBgmGain = null, bonusBgmTimer = null;
+function sfxBonus() {
+  // 기존 BGM 잠시 낮춤
+  if (bgmMasterGain) bgmMasterGain.gain.setValueAtTime(0.2, getAudioCtx().currentTime);
+  if (bonusBgmPlaying) return;
+  bonusBgmPlaying = true;
+  const ac = getAudioCtx();
+  bonusBgmGain = ac.createGain();
+  bonusBgmGain.gain.value = 0.22;
+  bonusBgmGain.connect(ac.destination);
+  // 신나는 보너스 멜로디 루프
+  const BONUS_NOTES = [
+    [784,0.5],[880,0.5],[988,0.5],[1046,0.5],
+    [988,0.5],[880,0.5],[784,1.0],
+    [659,0.5],[784,0.5],[880,1.0],
+  ];
+  const bpm = 180, beat = 60/bpm;
+  function playBonusLoop() {
+    if (!bonusBgmPlaying) return;
+    let t = ac.currentTime;
+    BONUS_NOTES.forEach(([f, b]) => {
+      playTone(f, 'square', t, b*beat*0.85, 0.25, ac, bonusBgmGain);
+      t += b * beat;
+    });
+    const total = BONUS_NOTES.reduce((s,[,b])=>s+b,0) * beat;
+    bonusBgmTimer = setTimeout(playBonusLoop, (total - 0.05) * 1000);
+  }
+  playBonusLoop();
+}
+function stopBonusBgm() {
+  bonusBgmPlaying = false;
+  clearTimeout(bonusBgmTimer);
+  if (bonusBgmGain) {
+    bonusBgmGain.gain.exponentialRampToValueAtTime(0.001, getAudioCtx().currentTime + 0.3);
+  }
+  // BGM 원래대로
+  if (bgmMasterGain) bgmMasterGain.gain.setValueAtTime(1, getAudioCtx().currentTime + 0.3);
+}
+
+/* ─── 타이머 ─── */
+/* ─── 오디오 엔진 (Web Audio API) ─── */
 let audioCtx = null;
-let bgmNodes = [];
+let bgmNodes = [];   // 현재 재생 중인 bgm 노드들
 let bgmPlaying = false;
 
 function getAudioCtx() {
@@ -407,9 +779,10 @@ function getAudioCtx() {
   return audioCtx;
 }
 
-function playTone(freq, type, start, duration, gain, actx, dest) {
-  const osc = actx.createOscillator();
-  const g   = actx.createGain();
+// 단음 재생 헬퍼
+function playTone(freq, type, start, duration, gain, ctx, dest) {
+  const osc = ctx.createOscillator();
+  const g   = ctx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, start);
   g.gain.setValueAtTime(gain, start);
@@ -418,24 +791,33 @@ function playTone(freq, type, start, duration, gain, actx, dest) {
   osc.start(start); osc.stop(start + duration);
 }
 
-const BGM_BPM  = 148;
-const BGM_BEAT = 60 / BGM_BPM;
+// ── BGM: 경쾌한 8비트 멜로디 루프 ──
+const BGM_BPM   = 148;
+const BGM_BEAT  = 60 / BGM_BPM;
+const BGM_BAR   = BGM_BEAT * 4;
+
+// 멜로디 음표 (도레미 기준 Hz, C4=261.63)
 const NOTE = {
-  C3:130.81, F3:174.61, G3:196.00,
   C4:261.63, D4:293.66, E4:329.63, F4:349.23,
   G4:392.00, A4:440.00, B4:493.88,
-  C5:523.25, E5:659.25,
+  C5:523.25, D5:587.33, E5:659.25, F5:698.46,
+  G5:783.99, A5:880.00,
+  G3:196.00, C3:130.81, F3:174.61,
 };
+
+// 멜로디 패턴 (음, 박자길이)
 const MELODY = [
   [NOTE.E4,1],[NOTE.G4,1],[NOTE.A4,2],
   [NOTE.G4,1],[NOTE.E4,1],[NOTE.C4,2],
   [NOTE.D4,1],[NOTE.F4,1],[NOTE.G4,2],
-  [NOTE.F4,1],[NOTE.D4,1],[NOTE.B4,2],
+  [NOTE.F4,1],[NOTE.D4,1],[NOTE.B4,2],  // ← 2바
   [NOTE.E4,1],[NOTE.G4,1],[NOTE.C5,2],
   [NOTE.B4,1],[NOTE.G4,1],[NOTE.E4,2],
   [NOTE.A4,1],[NOTE.C5,1],[NOTE.E5,1],[NOTE.C5,1],
-  [NOTE.G4,2],[NOTE.E4,2],
+  [NOTE.G4,2],[NOTE.E4,2],              // ← 4바
 ];
+
+// 베이스 패턴 (4바 반복)
 const BASS = [
   [NOTE.C3,2],[NOTE.G3,2],
   [NOTE.C3,2],[NOTE.G3,2],
@@ -443,90 +825,107 @@ const BASS = [
   [NOTE.G3,2],[NOTE.G3,2],
 ];
 
-function scheduleBgmLoop(actx, masterGain) {
+function scheduleBgmLoop(ctx, masterGain) {
   if (!bgmPlaying) return;
-  const now = actx.currentTime;
+  const now = ctx.currentTime;
+  const melodyGain = ctx.createGain();
+  melodyGain.gain.value = 0.18;
+  melodyGain.connect(masterGain);
 
-  const melodyGain = actx.createGain(); melodyGain.gain.value = 0.18; melodyGain.connect(masterGain);
-  const bassGain   = actx.createGain(); bassGain.gain.value   = 0.12; bassGain.connect(masterGain);
-  const drumGain   = actx.createGain(); drumGain.gain.value   = 0.06; drumGain.connect(masterGain);
+  const bassGain = ctx.createGain();
+  bassGain.gain.value = 0.12;
+  bassGain.connect(masterGain);
 
+  // 멜로디
   let t = now;
   MELODY.forEach(([freq, beats]) => {
     const dur = beats * BGM_BEAT;
-    playTone(freq, 'square', t, dur * 0.85, 0.3, actx, melodyGain);
+    playTone(freq, 'square', t, dur * 0.85, 0.3, ctx, melodyGain);
     t += dur;
   });
 
+  // 베이스
   let bt = now;
   BASS.forEach(([freq, beats]) => {
     const dur = beats * BGM_BEAT;
-    playTone(freq, 'triangle', bt, dur * 0.7, 0.5, actx, bassGain);
+    playTone(freq, 'triangle', bt, dur * 0.7, 0.5, ctx, bassGain);
     bt += dur;
   });
 
+  // 리듬 (하이햇 느낌)
+  const drumGain = ctx.createGain();
+  drumGain.gain.value = 0.06;
+  drumGain.connect(masterGain);
   for (let i = 0; i < 16; i++) {
-    const buf  = actx.createBuffer(1, actx.sampleRate * 0.06, actx.sampleRate);
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.06, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1) * (1 - j / data.length);
-    const src = actx.createBufferSource(); src.buffer = buf;
-    src.connect(drumGain); src.start(now + i * BGM_BEAT * 0.5);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(drumGain);
+    src.start(now + i * BGM_BEAT * 0.5);
   }
 
+  // 루프 길이 = MELODY 총 박자 합
   const totalBeats = MELODY.reduce((s, [,b]) => s + b, 0);
-  bgmNodes._timer = setTimeout(() => scheduleBgmLoop(actx, masterGain), (totalBeats * BGM_BEAT - 0.1) * 1000);
+  const loopDur = totalBeats * BGM_BEAT;
+
+  bgmNodes._timer = setTimeout(() => scheduleBgmLoop(ctx, masterGain), (loopDur - 0.1) * 1000);
 }
 
 let bgmMasterGain = null;
 function startBgm() {
   if (bgmPlaying) return;
   bgmPlaying = true;
-  const actx = getAudioCtx();
-  if (actx.state === 'suspended') actx.resume();
-  bgmMasterGain = actx.createGain();
+  const ctx = getAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+  bgmMasterGain = ctx.createGain();
   bgmMasterGain.gain.value = 1;
-  bgmMasterGain.connect(actx.destination);
-  scheduleBgmLoop(actx, bgmMasterGain);
+  bgmMasterGain.connect(ctx.destination);
+  scheduleBgmLoop(ctx, bgmMasterGain);
 }
 
 function stopBgm() {
   bgmPlaying = false;
   clearTimeout(bgmNodes._timer);
   if (bgmMasterGain) {
-    const actx = getAudioCtx();
-    bgmMasterGain.gain.setValueAtTime(bgmMasterGain.gain.value, actx.currentTime);
-    bgmMasterGain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.3);
+    bgmMasterGain.gain.setValueAtTime(bgmMasterGain.gain.value, getAudioCtx().currentTime);
+    bgmMasterGain.gain.exponentialRampToValueAtTime(0.001, getAudioCtx().currentTime + 0.3);
   }
 }
 
+// ── 효과음 ──
 function sfxCoin() {
-  const actx = getAudioCtx();
-  const g = actx.createGain(); g.connect(actx.destination);
-  [523, 659, 784].forEach((f, i) => playTone(f, 'sine', actx.currentTime + i*0.06, 0.12, 0.15, actx, g));
+  const ctx = getAudioCtx();
+  const g = ctx.createGain(); g.connect(ctx.destination);
+  [523, 659, 784].forEach((f, i) => playTone(f, 'sine', ctx.currentTime + i*0.06, 0.12, 0.15, ctx, g));
 }
 function sfxBomb() {
-  const actx = getAudioCtx();
-  const g = actx.createGain(); g.gain.value = 0.4; g.connect(actx.destination);
-  const osc = actx.createOscillator(); osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(120, actx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(40, actx.currentTime + 0.3);
-  const eg = actx.createGain();
-  eg.gain.setValueAtTime(0.5, actx.currentTime);
-  eg.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.35);
+  const ctx = getAudioCtx();
+  const g = ctx.createGain(); g.gain.value = 0.4; g.connect(ctx.destination);
+  // 저음 펑 소리
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(120, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.3);
+  const eg = ctx.createGain();
+  eg.gain.setValueAtTime(0.5, ctx.currentTime);
+  eg.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
   osc.connect(eg); eg.connect(g);
-  osc.start(); osc.stop(actx.currentTime + 0.35);
-  const buf = actx.createBuffer(1, actx.sampleRate * 0.2, actx.sampleRate);
+  osc.start(); osc.stop(ctx.currentTime + 0.35);
+  // 노이즈
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
   const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1)*(1-i/d.length);
-  const ns = actx.createBufferSource(); ns.buffer = buf;
-  const ng = actx.createGain(); ng.gain.value = 0.3;
+  for (let i=0;i<d.length;i++) d[i] = (Math.random()*2-1)*(1-i/d.length);
+  const ns = ctx.createBufferSource(); ns.buffer = buf;
+  const ng = ctx.createGain(); ng.gain.value = 0.3;
   ns.connect(ng); ng.connect(g); ns.start();
 }
 function sfxGameOver() {
-  const actx = getAudioCtx();
-  const g = actx.createGain(); g.connect(actx.destination);
+  const ctx = getAudioCtx();
+  const g = ctx.createGain(); g.connect(ctx.destination);
   [[220,0],[185,0.25],[165,0.5],[130,0.8]].forEach(([f,t]) =>
-    playTone(f, 'sawtooth', actx.currentTime+t, 0.3, 0.25, actx, g));
+    playTone(f, 'sawtooth', ctx.currentTime+t, 0.3, 0.25, ctx, g));
 }
 
 /* ─── 게임 루프 ─── */
@@ -539,7 +938,11 @@ function loop(ts) {
 /* ─── 게임 시작/종료 ─── */
 function startGame() {
   score = 0; lives = 3; elapsed = 0;
-  items = []; sparks = []; pops = []; spawnT = 0;
+  items = []; sparks = []; pops = []; fireworks = []; spawnT = 0;
+  combo = 0; comboTimer = 0;
+  bonusActive = false; bonusTimer = 0; lastBonusTier = 0;
+  newRecord = false; recordTimer = 0;
+  stopBonusBgm();
   elScore.textContent = '0';
   refreshLives();
   startScr.style.display = 'none';
@@ -553,22 +956,33 @@ function startGame() {
 function endGame() {
   running = false;
   stopBgm();
+  stopBonusBgm();
   sfxGameOver();
-  if (score > best) best = score;
+  const hadPrevBest = best > 0;
+  const isNewBest = score > best;
+  if (isNewBest) best = score;
   elBest.textContent    = best;
   elGoScore.textContent = `내 점수: ${score} 점`;
-  elGoBest.textContent  = `최고기록: ${best} 점`;
+  // 이전 기록이 없으면 신기록 표시 안 함
+  elGoBest.textContent  = (isNewBest && hadPrevBest) ? '🏆 신기록!' : `최고기록: ${best} 점`;
+
   renderOverSb();
   overScr.style.display = 'flex';
 }
 
-/* ─── 스코어보드 ─── */
+/* ─── 스코어보드 localStorage ─── */
 const SB_KEY = 'rabbitCoinSB_v1';
 function loadSb() {
-  try { return JSON.parse(localStorage.getItem(SB_KEY)) || []; } catch(e) { return []; }
+  try { return JSON.parse(localStorage.getItem(SB_KEY)) || []; }
+  catch(e) { return []; }
 }
-function saveSb(list) { localStorage.setItem(SB_KEY, JSON.stringify(list)); }
-function getRank(list, s) { return list.filter(e => e.score > s).length + 1; }
+function saveSb(list) {
+  localStorage.setItem(SB_KEY, JSON.stringify(list));
+}
+function getRank(list, s) {
+  // 내 점수보다 높은 항목 수 + 1
+  return list.filter(e => e.score > s).length + 1;
+}
 const MEDALS = ['🥇','🥈','🥉'];
 
 function renderSbTable(tbodyId, list, highlightScore) {
@@ -599,7 +1013,11 @@ function renderOverSb() {
   document.getElementById('myRankText').textContent =
     list.length === 0 ? '첫 번째 기록을 남겨보세요! 🎉'
     : `현재 랭킹: ${myRank}위 / ${list.length + 1}명`;
+
+  // 현재 점수 임시 하이라이트용 플래그 없이 렌더
   renderSbTable('overSbBody', list, undefined);
+
+  // 입력 초기화
   ['ic0','ic1','ic2'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('initialWrap').style.display = 'block';
   document.getElementById('ic0').focus();
@@ -610,15 +1028,19 @@ function renderMainSb() {
   renderSbTable('sbBody', list, undefined);
 }
 
-/* ─── 이니셜 입력 ─── */
+/* ─── 이니셜 입력 자동 포커스 ─── */
 ['ic0','ic1','ic2'].forEach((id, i) => {
   const el = document.getElementById(id);
   el.addEventListener('input', () => {
     el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (el.value.length === 1 && i < 2) document.getElementById('ic' + (i+1)).focus();
+    if (el.value.length === 1 && i < 2) {
+      document.getElementById('ic' + (i+1)).focus();
+    }
   });
   el.addEventListener('keydown', e => {
-    if (e.key === 'Backspace' && el.value === '' && i > 0) document.getElementById('ic' + (i-1)).focus();
+    if (e.key === 'Backspace' && el.value === '' && i > 0) {
+      document.getElementById('ic' + (i-1)).focus();
+    }
   });
 });
 
@@ -634,20 +1056,31 @@ document.getElementById('btnSubmit').addEventListener('click', () => {
     document.getElementById('ic0').focus();
     return;
   }
+
+  // 저장
   let list = loadSb();
   const newEntry = { name, score, _highlight: true };
   list.push(newEntry);
   list.sort((a, b) => b.score - a.score);
+  // 상위 20개만 유지
   list = list.slice(0, 20);
   saveSb(list);
+
+  // 하이라이트 해서 다시 렌더
   renderSbTable('overSbBody', list, score);
+  // 하이라이트 플래그 제거 후 저장
   list.forEach(e => delete e._highlight);
   saveSb(list);
+
   const rank = list.findIndex(e => e.name === name && e.score === score) + 1;
   document.getElementById('myRankText').textContent = `🎉 ${rank}위로 등록됐어요!`;
   document.getElementById('initialWrap').style.display = 'none';
+
+  // me 클래스 강제 적용
   const rows = document.querySelectorAll('#overSbBody tr');
-  rows.forEach((tr, i) => { if (i === rank - 1) tr.className = 'me'; });
+  rows.forEach((tr, i) => {
+    if (i === rank - 1) tr.className = 'me';
+  });
 });
 
 /* ─── 버튼 이벤트 ─── */
@@ -673,6 +1106,7 @@ window.addEventListener('keyup', e => {
   if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
 });
 
+// 모바일
 const mbl = document.getElementById('mbl');
 const mbr = document.getElementById('mbr');
 mbl.addEventListener('touchstart', e => { e.preventDefault(); keys.left  = true;  });
