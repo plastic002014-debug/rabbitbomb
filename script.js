@@ -89,24 +89,23 @@ const COINS = [
 function spawnItem() {
   const x = 50 + Math.random() * (W - 100);
 
-  // 점수 기반 난이도 (부드럽게 단계적으로 상승)
-  // 0점~무한 / 구간별 체감 설계:
-  //   0~ 50점: 입문  (아주 느리고 폭탄 적음)
-  //  50~150점: 초급  (서서히 빨라짐)
-  // 150~300점: 중급  (체감 빠름, 폭탄 증가)
-  // 300~500점: 고급  (꽤 빠름)
-  // 500점 이상: 최고  (최대 속도 유지)
-  const s = Math.min(score, 500);
-  const phase = s / 500;                      // 0.0 ~ 1.0
-  const spd   = 1.2 + phase * 3.0;           // 속도: 1.2 → 4.2
-  const bombP = 0.06 + phase * 0.22;         // 폭탄확률: 6% → 28%
+  // ── 점수 기반 난이도 (상한 없이 계속 증가)
+  // 보너스 후에도 score 기반이므로 자연스럽게 빨라짐
+  //   0~ 50점: 2.0배 (적당한 초반 속도)
+  //  50~200점: 2.0→3.2배
+  // 200~500점: 3.2→4.5배
+  // 500점~  : 4.5→6.0배 (계속 증가)
+  const phase1 = Math.min(score, 500) / 500;          // 0→1 (0~500점)
+  const phase2 = Math.min(Math.max(score - 500, 0), 500) / 500; // 0→1 (500~1000점)
+  const spd    = 2.0 + phase1 * 2.5 + phase2 * 1.5;  // 2.0 → 4.5 → 6.0
+  const bombP  = 0.08 + phase1 * 0.20;               // 8% → 28%
 
-  // 보너스 타임: 10원짜리만 폭탄 없이, 빠른 속도감
+  // 보너스 타임: 10원짜리만, 빠른 속도 (현재 spd 기반 + 보너스)
   if (bonusActive) {
     const c = COINS[2];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: 6 + Math.random() * 2.5,
+      vy: spd * 1.6 + Math.random() * 1.5,  // 일반보다 1.6배 빠름
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
@@ -116,25 +115,36 @@ function spawnItem() {
 
   // 목숨 아이템 (100점 이상, 목숨 부족 시 10% 확률)
   if (score >= 100 && lives < 3 && Math.random() < 0.10) {
-    items.push({ kind: 'life', x, y: -20, r: 16, vy: 1.8 + Math.random() * 0.6, spin: 0 });
+    items.push({ kind: 'life', x, y: -20, r: 16, vy: spd * 0.8 + Math.random() * 0.5, spin: 0 });
     return;
   }
 
   if (Math.random() < bombP) {
     items.push({
       kind: 'bomb', x, y: -28, r: 20,
-      vy: (1.6 + Math.random() * 0.8) * spd, rot: 0
+      vy: (spd + Math.random() * 0.8), rot: 0
     });
   } else {
-    // 점수가 높을수록 고액 동전 비중 증가
+    // ── 동전 순차 등장: 1점 → 5점 → 10점
+    // 0~ 60점:  1점 100%
+    // 60~150점: 1점 위주, 5점 조금씩 등장
+    // 150~300점: 1점·5점 혼합
+    // 300점~:   1·5·10점 모두 등장 (10점은 완전 랜덤)
+    let coinIdx;
     const r = Math.random();
-    const coinIdx = score < 80  ? (r < 0.55 ? 0 : r < 0.85 ? 1 : 2)   // 55/30/15
-                  : score < 200 ? (r < 0.38 ? 0 : r < 0.72 ? 1 : 2)   // 38/34/28
-                  :               (r < 0.25 ? 0 : r < 0.55 ? 1 : 2);  // 25/30/45
+    if (score < 60) {
+      coinIdx = 0;                                        // 1점만
+    } else if (score < 150) {
+      coinIdx = r < 0.70 ? 0 : 1;                        // 1점 70%, 5점 30%
+    } else if (score < 300) {
+      coinIdx = r < 0.45 ? 0 : 1;                        // 1점 45%, 5점 55%
+    } else {
+      coinIdx = r < 0.30 ? 0 : r < 0.60 ? 1 : 2;        // 1점 30%, 5점 30%, 10점 40% (랜덤)
+    }
     const c = COINS[coinIdx];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: (1.6 + Math.random() * 0.8) * spd,
+      vy: spd + Math.random() * 0.8,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
@@ -227,10 +237,11 @@ function update(dt) {
   // 스폰
   spawnT += dt;
   elapsed += dt / 1000;
-  // 점수가 높을수록 스폰 간격 짧아짐: 0점=1.4초 → 500점=0.55초
+  // 스폰 간격: 점수가 높을수록 계속 빨라짐 (상한 없음)
+  // 0점=1.3초, 200점=0.9초, 500점=0.6초, 1000점=0.38초
   const spawnInterval = bonusActive
-    ? 250
-    : Math.max(550, 1400 - Math.min(score, 500) * 1.7);
+    ? 220
+    : Math.max(380, 1300 - score * 1.8);
   if (spawnT >= spawnInterval) {
     spawnItem();
     if (bonusActive) spawnItem();
