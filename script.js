@@ -42,9 +42,17 @@ const keys = {};
 let combo = 0, comboTimer = 0;
 // 보너스 타임
 let bonusActive = false, bonusTimer = 0;
-let lastBonusTier = 0;  // 이미 발동한 티어 기록
+let lastBonusTier = 0;
 // 기록 갱신
 let newRecord = false, recordTimer = 0;
+// 보스 스테이지
+let bossActive = false;          // 보스 진행 중
+let bossWarning = false;         // WARNING 연출 중
+let bossWarningTimer = 0;        // WARNING 표시 카운터 (프레임)
+let bossRowsLeft = 0;            // 남은 줄 수 (5줄 통과 목표)
+let bossRowTimer = 0;            // 다음 줄 스폰까지 대기
+let bossRowInterval = 120;       // 줄 간격 (프레임 기준)
+let lastBossTier = 0;            // 이미 발동한 보스 단계 (1000점 단위)
 
 /* ─── DOM 참조 ─── */
 const elScore   = document.getElementById('elScore');
@@ -89,23 +97,20 @@ const COINS = [
 function spawnItem() {
   const x = 50 + Math.random() * (W - 100);
 
-  // ── 점수 기반 난이도 (상한 없이 계속 증가)
-  // 보너스 후에도 score 기반이므로 자연스럽게 빨라짐
-  //   0~ 50점: 2.0배 (적당한 초반 속도)
-  //  50~200점: 2.0→3.2배
-  // 200~500점: 3.2→4.5배
-  // 500점~  : 4.5→6.0배 (계속 증가)
-  const phase1 = Math.min(score, 500) / 500;          // 0→1 (0~500점)
-  const phase2 = Math.min(Math.max(score - 500, 0), 500) / 500; // 0→1 (500~1000점)
-  const spd    = 2.0 + phase1 * 2.5 + phase2 * 1.5;  // 2.0 → 4.5 → 6.0
-  const bombP  = 0.08 + phase1 * 0.20;               // 8% → 28%
+  // 점수 기반 난이도 — 상한 없이 계속 빨라짐
+  //  0점 : spd=2.8  (초반부터 빠른 체감)
+  //  300점: spd=4.0
+  //  600점: spd=5.2
+  // 1000점: spd=6.6  (이후에도 계속 증가)
+  const spd   = 2.8 + (score / 300) * 1.2;
+  const bombP = 0.08 + Math.min(score / 500, 1) * 0.20;
 
-  // 보너스 타임: 10원짜리만, 빠른 속도 (현재 spd 기반 + 보너스)
+  // 보너스 타임: 10원짜리만, 현재 속도 기반으로 빠르게
   if (bonusActive) {
     const c = COINS[2];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: spd * 1.6 + Math.random() * 1.5,  // 일반보다 1.6배 빠름
+      vy: spd * 1.5 + Math.random() * 1.0,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
@@ -113,42 +118,55 @@ function spawnItem() {
     return;
   }
 
-  // 목숨 아이템 (100점 이상, 목숨 부족 시 10% 확률)
+  // 목숨 아이템
   if (score >= 100 && lives < 3 && Math.random() < 0.10) {
-    items.push({ kind: 'life', x, y: -20, r: 16, vy: spd * 0.8 + Math.random() * 0.5, spin: 0 });
+    items.push({ kind: 'life', x, y: -20, r: 16, vy: spd * 0.75, spin: 0 });
     return;
   }
 
   if (Math.random() < bombP) {
-    items.push({
-      kind: 'bomb', x, y: -28, r: 20,
-      vy: (spd + Math.random() * 0.8), rot: 0
-    });
+    items.push({ kind: 'bomb', x, y: -28, r: 20, vy: spd + Math.random() * 0.6, rot: 0 });
   } else {
-    // ── 동전 순차 등장: 1점 → 5점 → 10점
-    // 0~ 60점:  1점 100%
-    // 60~150점: 1점 위주, 5점 조금씩 등장
-    // 150~300점: 1점·5점 혼합
-    // 300점~:   1·5·10점 모두 등장 (10점은 완전 랜덤)
+    // 동전 순차 등장: 1점 → 5점 → 10점
     let coinIdx;
     const r = Math.random();
-    if (score < 60) {
-      coinIdx = 0;                                        // 1점만
-    } else if (score < 150) {
-      coinIdx = r < 0.70 ? 0 : 1;                        // 1점 70%, 5점 30%
-    } else if (score < 300) {
-      coinIdx = r < 0.45 ? 0 : 1;                        // 1점 45%, 5점 55%
-    } else {
-      coinIdx = r < 0.30 ? 0 : r < 0.60 ? 1 : 2;        // 1점 30%, 5점 30%, 10점 40% (랜덤)
-    }
+    if (score < 60)       coinIdx = 0;
+    else if (score < 150) coinIdx = r < 0.70 ? 0 : 1;
+    else if (score < 300) coinIdx = r < 0.45 ? 0 : 1;
+    else                  coinIdx = r < 0.30 ? 0 : r < 0.60 ? 1 : 2;
     const c = COINS[coinIdx];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: spd + Math.random() * 0.8,
+      vy: spd + Math.random() * 0.6,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
     });
+  }
+}
+
+/* ─── 보스 줄(row) 스폰 ─── */
+function spawnBossRow() {
+  const SLOTS = 7;
+  const coinSlot = Math.floor(Math.random() * SLOTS);
+  const slotW = W / SLOTS;
+  const spd = 2.8 + (score / 300) * 1.2;
+
+  for (let i = 0; i < SLOTS; i++) {
+    const x = slotW * i + slotW / 2;
+    if (i === coinSlot) {
+      const c = COINS[2];
+      items.push({
+        kind: 'coin', x, y: -24, r: c.r,
+        vy: spd + 0.5,
+        spin: Math.random() * Math.PI * 2,
+        spinV: 0.06,
+        value: c.value, col: c.col, shine: c.shine,
+        isBossRow: true
+      });
+    } else {
+      items.push({ kind: 'bomb', x, y: -28, r: 20, vy: spd + 0.5, rot: 0, isBossRow: true });
+    }
   }
 }
 
@@ -229,23 +247,66 @@ function update(dt) {
     bonusTimer -= 1;
     if (bonusTimer <= 0) {
       bonusActive = false;
-      combo = 0; comboTimer = 0; // 보너스 끝나면 콤보 리셋 → 새로 20콤보 도전
+      combo = 0; comboTimer = 0;
       stopBonusBgm();
     }
   }
 
-  // 스폰
-  spawnT += dt;
+  // ── 보스 스테이지 체크 (1000점 단위)
+  const bossTier = Math.floor(score / 1000);
+  if (!bossActive && !bossWarning && !bonusActive && bossTier > lastBossTier) {
+    lastBossTier = bossTier;
+    bossWarning = true;
+    bossWarningTimer = 180; // 3초 WARNING 연출
+    items = []; // 화면 초기화
+    spawnT = 9999; // 일반 스폰 잠시 차단
+  }
+
+  // WARNING 연출 카운트다운
+  if (bossWarning) {
+    bossWarningTimer--;
+    if (bossWarningTimer <= 0) {
+      bossWarning = false;
+      bossActive = true;
+      bossRowsLeft = 5;
+      bossRowTimer = 0;
+    }
+  }
+
+  // 보스 스테이지 진행
+  if (bossActive) {
+    bossRowTimer--;
+    if (bossRowTimer <= 0) {
+      if (bossRowsLeft > 0) {
+        spawnBossRow();
+        bossRowsLeft--;
+        bossRowTimer = bossRowInterval;
+      }
+    }
+
+    // 보스 줄 아이템이 전부 화면 밖으로 나가면 종료 판단
+    const bossItems = items.filter(it => it.isBossRow);
+    if (bossRowsLeft === 0 && bossItems.length === 0) {
+      bossActive = false;
+      addPop(W / 2, H / 2, '🎉 보스 클리어!', '#00ffcc');
+      addPop(W / 2, H / 2 + 44, '+50 보너스!', '#ffe066');
+      score += 50;
+      elScore.textContent = score;
+    }
+  }
+
+  // 스폰 — 보스/워닝 중에는 일반 아이템 스폰 차단
   elapsed += dt / 1000;
-  // 스폰 간격: 점수가 높을수록 계속 빨라짐 (상한 없음)
-  // 0점=1.3초, 200점=0.9초, 500점=0.6초, 1000점=0.38초
-  const spawnInterval = bonusActive
-    ? 220
-    : Math.max(380, 1300 - score * 1.8);
-  if (spawnT >= spawnInterval) {
-    spawnItem();
-    if (bonusActive) spawnItem();
-    spawnT = 0;
+  if (!bossActive && !bossWarning) {
+    spawnT += dt;
+    const spawnInterval = bonusActive
+      ? 220
+      : Math.max(380, 1300 - score * 1.8);
+    if (spawnT >= spawnInterval) {
+      spawnItem();
+      if (bonusActive) spawnItem();
+      spawnT = 0;
+    }
   }
 
   // 아이템 충돌
@@ -260,8 +321,13 @@ function update(dt) {
         sfxCoin();
         bunny.face = 'happy'; bunny.faceTimer = 50;
 
-        // 콤보 — 보너스 타임 중에는 콤보 누적 제외
-        if (!bonusActive) {
+        // 보스 줄 동전 받으면 같은 줄 폭탄 모두 제거
+        if (it.isBossRow) {
+          items = items.filter(b => !(b.isBossRow && b.kind === 'bomb' && Math.abs(b.y - it.y) < 60));
+        }
+
+        // 콤보 — 보너스·보스 타임 중에는 콤보 누적 제외
+        if (!bonusActive && !bossActive) {
           combo++;
           comboTimer = 180;
           if (combo > 0 && combo % 10 === 0) {
@@ -276,6 +342,13 @@ function update(dt) {
       } else if (it.kind === 'bomb') {
         lives--;
         combo = 0; comboTimer = 0; lastBonusTier = 0;
+        // 보스 줄 폭탄 맞으면 해당 줄 전체 제거 후 보스 재도전
+        if (it.isBossRow) {
+          items = items.filter(b => !(b.isBossRow && Math.abs(b.y - it.y) < 60));
+          if (bossRowsLeft === 0 && lives > 0) {
+            // 이미 모든 줄 소화 중이었으면 패스
+          }
+        }
         refreshLives();
         doFlash();
         addSparks(it.x, it.y, '#ff5500', 20);
@@ -353,8 +426,6 @@ function draw() {
     ctx.fillStyle = col;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
-
-    // 보너스 타임 문구
     const pulse = 1 + Math.sin(t * 0.008) * 0.06;
     ctx.save();
     ctx.translate(W / 2, 90);
@@ -364,6 +435,55 @@ function draw() {
     ctx.fillStyle = col;
     ctx.shadowColor = col; ctx.shadowBlur = 18;
     ctx.fillText('🎉 보너스 타임!', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // ── WARNING 연출
+  if (bossWarning) {
+    const t = Date.now();
+    const flash2 = Math.floor(t / 200) % 2 === 0;
+    ctx.fillStyle = flash2 ? 'rgba(180,0,0,0.35)' : 'rgba(0,0,0,0.2)';
+    ctx.fillRect(0, 0, W, H);
+
+    const pulse = 1 + Math.sin(t * 0.015) * 0.08;
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(pulse, pulse);
+    ctx.font = `bold ${Math.min(W * 0.14, 90)}px Jua, cursive`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = flash2 ? '#ff2222' : '#ff8888';
+    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 40;
+    ctx.fillText('⚠️ WARNING ⚠️', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.font = `bold ${Math.min(W * 0.06, 36)}px Jua, cursive`;
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 12;
+    ctx.fillText('보스 스테이지 시작!', 0, 60);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // ── 보스 스테이지 진행 중 UI (남은 줄 표시)
+  if (bossActive) {
+    const t = Date.now();
+    ctx.save();
+    ctx.fillStyle = 'rgba(120,0,0,0.18)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 상단 진행 바
+    const total = 5;
+    const cleared = total - bossRowsLeft;
+    const barW = Math.min(W * 0.5, 300);
+    const barX = W / 2 - barW / 2;
+    const barY = 75;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath(); ctx.arc(W/2, 90, barW/2 + 18, 0, Math.PI*2); ctx.fill();
+    ctx.font = 'bold 16px Jua, cursive';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ff4444';
+    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 10;
+    ctx.fillText(`👾 보스 스테이지   ${cleared} / ${total}`, W / 2, 90);
     ctx.shadowBlur = 0;
     ctx.restore();
   }
@@ -953,6 +1073,8 @@ function startGame() {
   combo = 0; comboTimer = 0;
   bonusActive = false; bonusTimer = 0; lastBonusTier = 0;
   newRecord = false; recordTimer = 0;
+  bossActive = false; bossWarning = false; bossWarningTimer = 0;
+  bossRowsLeft = 0; bossRowTimer = 0; lastBossTier = 0;
   stopBonusBgm();
   elScore.textContent = '0';
   refreshLives();
