@@ -1,3 +1,270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐰 돈먹는 토깽이</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Jua',cursive;overflow:hidden;background:#0d1f0d;user-select:none;}
+#gc{position:relative;width:100vw;height:100vh;overflow:hidden;}
+
+/* 하늘 */
+#sky{position:absolute;inset:0;background:linear-gradient(180deg,#050112 0%,#150840 30%,#2a1560 55%,#4a2f8a 75%,#7b5ea8 90%,#9b7cba 100%);}
+.star{position:absolute;background:#fff;border-radius:50%;animation:tw var(--d,2s) ease-in-out infinite;}
+@keyframes tw{0%,100%{opacity:1}50%{opacity:.15}}
+#moon{position:absolute;top:6%;right:8%;width:68px;height:68px;background:radial-gradient(circle at 33% 33%,#fffde7,#f9c74f);border-radius:50%;box-shadow:0 0 28px #f9c74f88,0 0 60px #f9c74f33;}
+.cloud{position:absolute;border-radius:50px;background:rgba(255,255,255,.09);animation:dc linear infinite;}
+@keyframes dc{from{transform:translateX(-250px)}to{transform:translateX(110vw)}}
+
+/* 숲 */
+#forest{position:absolute;bottom:0;left:0;width:100%;height:65%;pointer-events:none;}
+
+/* 땅 */
+#ground{position:absolute;bottom:0;left:0;width:100%;height:108px;background:linear-gradient(180deg,#3d7a2e,#1e4016);border-top:4px solid #5db345;z-index:2;}
+#ground::before{
+  content:'';position:absolute;top:-16px;left:0;width:100%;height:20px;
+  background:repeating-linear-gradient(90deg,transparent 0,transparent 7px,#5db345 7px,#5db345 9px);
+  clip-path:polygon(0% 100%,1% 0%,2% 100%,3% 0%,4% 100%,5% 0%,6% 100%,7% 0%,8% 100%,9% 0%,10% 100%,11% 0%,12% 100%,13% 0%,14% 100%,15% 0%,16% 100%,17% 0%,18% 100%,19% 0%,20% 100%,21% 0%,22% 100%,23% 0%,24% 100%,25% 0%,26% 100%,27% 0%,28% 100%,29% 0%,30% 100%,31% 0%,32% 100%,33% 0%,34% 100%,35% 0%,36% 100%,37% 0%,38% 100%,39% 0%,40% 100%,41% 0%,42% 100%,43% 0%,44% 100%,45% 0%,46% 100%,47% 0%,48% 100%,49% 0%,50% 100%,51% 0%,52% 100%,53% 0%,54% 100%,55% 0%,56% 100%,57% 0%,58% 100%,59% 0%,60% 100%,61% 0%,62% 100%,63% 0%,64% 100%,65% 0%,66% 100%,67% 0%,68% 100%,69% 0%,70% 100%,71% 0%,72% 100%,73% 0%,74% 100%,75% 0%,76% 100%,77% 0%,78% 100%,79% 0%,80% 100%,81% 0%,82% 100%,83% 0%,84% 100%,85% 0%,86% 100%,87% 0%,88% 100%,89% 0%,90% 100%,91% 0%,92% 100%,93% 0%,94% 100%,95% 0%,96% 100%,97% 0%,98% 100%,99% 0%,100% 100%);
+}
+
+/* 캔버스 */
+#cv{position:absolute;top:0;left:0;width:100%;height:100%;z-index:3;}
+
+/* HUD */
+#hud{position:absolute;top:14px;left:0;width:100%;display:flex;justify-content:center;gap:12px;padding:0 14px;z-index:10;pointer-events:none;flex-wrap:wrap;}
+.hb{background:rgba(0,0,0,.58);border:2px solid rgba(255,255,255,.2);border-radius:14px;padding:7px 16px;backdrop-filter:blur(8px);text-align:center;}
+.hl{font-size:10px;color:#aaffaa;letter-spacing:1px;}
+.hv{font-size:24px;color:#fff;line-height:1.15;}
+#lifeBar{display:flex;gap:4px;align-items:center;margin-top:3px;justify-content:center;}
+.lh{font-size:22px;}
+.lh.lost{filter:grayscale(1) opacity(.25);}
+
+/* 조작 안내 */
+#hint{position:absolute;bottom:125px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;
+  background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.2);border-radius:10px;
+  padding:5px 14px;color:#ccc;font-size:13px;white-space:nowrap;}
+
+/* 화면 플래시 */
+#flash{position:absolute;inset:0;pointer-events:none;z-index:16;background:rgba(255,40,0,0);transition:background .07s;}
+#flash.on{background:rgba(255,40,0,.45);}
+
+/* 오버레이 공통 */
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;backdrop-filter:blur(6px);}
+#startScreen{background:rgba(0,0,0,.78);}
+#overScreen{background:rgba(0,0,0,.88);display:none;padding:16px 0;justify-content:flex-start;padding-top:30px;}
+#sbScreen{background:rgba(0,0,0,.88);display:none;}
+
+#startScreen h1{font-size:clamp(28px,7vw,62px);color:#a8f07a;text-shadow:0 0 22px #5db345;margin-bottom:10px;animation:pulse 1.5s ease-in-out infinite;}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+#startScreen p{font-size:16px;color:#ddd;margin-bottom:5px;text-align:center;padding:0 18px;}
+#startScreen .note{font-size:13px;color:#999;margin-bottom:28px;}
+
+.btn{border:none;border-radius:50px;padding:13px 50px;font-family:'Jua',cursive;font-size:22px;cursor:pointer;transition:transform .13s;}
+#btnStart{background:linear-gradient(135deg,#5db345,#3a8c28);color:#fff;box-shadow:0 4px 18px #3a8c2877;}
+#btnStart:hover{transform:scale(1.07);}
+#btnRetry{background:linear-gradient(135deg,#5db345,#3a8c28);color:#fff;box-shadow:0 4px 18px #3a8c2877;}
+#btnRetry:hover{transform:scale(1.07);}
+
+/* 모바일 버튼 */
+#mctl{position:absolute;bottom:18px;left:0;width:100%;display:none;justify-content:space-between;padding:0 18px;z-index:15;}
+.mb{width:86px;height:86px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:30px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:transform .08s;opacity:.88;}
+.mb:active{transform:scale(.9);opacity:1;}
+#mbl{background:linear-gradient(150deg,#2255dd,#0f2a99);border:3px solid #5588ff;color:#fff;box-shadow:0 5px 18px rgba(0,0,50,.5);}
+#mbr{background:linear-gradient(150deg,#cc4411,#991100);border:3px solid #ff7744;color:#fff;box-shadow:0 5px 18px rgba(50,0,0,.5);}
+.mbl{font-size:11px;opacity:.85;}
+@media(pointer:coarse){#mctl{display:flex;}#hint{display:none;}}
+
+/* ── 버튼 행 (시작화면) ── */
+.btn-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center;}
+#btnScore{background:linear-gradient(135deg,#3a6fd8,#1a3fa8);color:#fff;box-shadow:0 4px 18px #1a3fa877;border:none;border-radius:50px;padding:13px 32px;font-family:'Jua',cursive;font-size:20px;cursor:pointer;transition:transform .13s;}
+#btnScore:hover{transform:scale(1.07);}
+
+/* ── 스코어보드 화면 ── */
+#sbScreen{background:rgba(0,0,0,.88);display:none;}
+#sbScreen h2{font-size:36px;color:#f9c74f;text-shadow:0 0 16px #f9c74f88;margin-bottom:18px;}
+#sbTable{width:min(420px,90vw);border-collapse:collapse;margin-bottom:22px;}
+#sbTable th{font-size:13px;color:#aaffaa;letter-spacing:1px;padding:6px 10px;border-bottom:2px solid rgba(255,255,255,.15);text-align:center;}
+#sbTable td{font-size:18px;color:#eee;padding:8px 10px;text-align:center;border-bottom:1px solid rgba(255,255,255,.07);}
+#sbTable tr.me td{color:#ffe066;font-size:20px;}
+#sbTable tr.rank1 td{color:#ffd700;}
+#sbTable tr.rank2 td{color:#c0c0c0;}
+#sbTable tr.rank3 td{color:#cd7f32;}
+.medal{font-size:20px;}
+#btnSbBack{background:linear-gradient(135deg,#5db345,#3a8c28);color:#fff;box-shadow:0 4px 18px #3a8c2877;border:none;border-radius:50px;padding:12px 40px;font-family:'Jua',cursive;font-size:20px;cursor:pointer;transition:transform .13s;}
+#btnSbBack:hover{transform:scale(1.07);}
+
+/* ── 게임오버 스코어보드 ── */
+#overScreen{overflow-y:auto;}
+#overTop{text-align:center;margin-bottom:12px;}
+#overTop h2{font-size:44px;color:#ff6b6b;margin-bottom:4px;}
+.go-sc{font-size:26px;color:#ffe066;margin-bottom:2px;}
+.go-bst{font-size:15px;color:#888;margin-bottom:12px;}
+#overSbWrap{width:min(400px,88vw);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:14px 10px;margin-bottom:14px;}
+#overSbWrap h3{font-size:18px;color:#f9c74f;text-align:center;margin-bottom:10px;letter-spacing:1px;}
+#overSbTable{width:100%;border-collapse:collapse;}
+#overSbTable th{font-size:11px;color:#aaffaa;letter-spacing:1px;padding:4px 8px;border-bottom:2px solid rgba(255,255,255,.15);text-align:center;}
+#overSbTable td{font-size:16px;color:#eee;padding:7px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,.07);}
+#overSbTable tr.me td{color:#ffe066;font-size:18px;background:rgba(255,224,102,.08);border-radius:6px;}
+#overSbTable tr.rank1 td{color:#ffd700;}
+#overSbTable tr.rank2 td{color:#c0c0c0;}
+#overSbTable tr.rank3 td{color:#cd7f32;}
+
+/* ── 이니셜 입력 ── */
+#initialWrap{width:min(400px,88vw);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:16px 20px;margin-bottom:14px;text-align:center;}
+#initialWrap p{font-size:15px;color:#ccc;margin-bottom:10px;}
+#initialWrap .my-rank{font-size:22px;color:#ffe066;margin-bottom:8px;}
+.initial-input-row{display:flex;gap:10px;justify-content:center;margin-bottom:12px;}
+.init-char{width:52px;height:60px;background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.3);border-radius:12px;font-family:'Jua',cursive;font-size:28px;color:#fff;text-align:center;text-transform:uppercase;outline:none;}
+.init-char:focus{border-color:#f9c74f;background:rgba(249,199,79,.12);}
+#btnSubmit{background:linear-gradient(135deg,#f9c74f,#f4a226);color:#222;box-shadow:0 4px 18px #f9c74f77;border:none;border-radius:50px;padding:11px 36px;font-family:'Jua',cursive;font-size:19px;cursor:pointer;transition:transform .13s;}
+#btnSubmit:hover{transform:scale(1.07);}
+#btnRetry{background:linear-gradient(135deg,#5db345,#3a8c28);color:#fff;box-shadow:0 4px 18px #3a8c2877;}
+#btnRetry:hover{transform:scale(1.07);}
+.over-btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+#sbEmpty{color:#888;font-size:15px;text-align:center;padding:20px 0;}
+</style>
+</head>
+<body>
+<div id="gc">
+  <div id="sky"></div>
+  <div id="moon"></div>
+
+  <!-- 숲 배경 -->
+  <svg id="forest" viewBox="0 0 1400 600" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
+    <!-- 원경 나무 -->
+    <g opacity=".38">
+      <polygon points="60,570 125,340 190,570" fill="#163312"/>
+      <polygon points="50,570 125,385 200,570" fill="#1a3d14"/>
+      <rect x="113" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="240,570 315,305 390,570" fill="#1a3d14"/>
+      <polygon points="230,570 315,348 400,570" fill="#163312"/>
+      <rect x="303" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="460,570 535,318 610,570" fill="#1e4618"/>
+      <polygon points="450,570 535,362 620,570" fill="#1a3d14"/>
+      <rect x="523" y="548" width="22" height="42" fill="#12290e"/>
+      <polygon points="680,570 755,295 830,570" fill="#163312"/>
+      <polygon points="670,570 755,338 840,570" fill="#1e4618"/>
+      <rect x="743" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="880,570 955,325 1030,570" fill="#1a3d14"/>
+      <polygon points="870,570 955,368 1040,570" fill="#163312"/>
+      <rect x="943" y="548" width="22" height="42" fill="#12290e"/>
+      <polygon points="1100,570 1175,308 1250,570" fill="#1e4618"/>
+      <polygon points="1090,570 1175,352 1260,570" fill="#1a3d14"/>
+      <rect x="1163" y="548" width="22" height="42" fill="#0e2009"/>
+      <polygon points="1300,570 1370,335 1440,570" fill="#163312"/>
+      <polygon points="1290,570 1370,378 1450,570" fill="#1e4618"/>
+      <rect x="1358" y="548" width="22" height="42" fill="#12290e"/>
+    </g>
+    <!-- 앞경 나무 -->
+    <g opacity=".92">
+      <polygon points="-10,592 68,358 146,592" fill="#2a6020"/>
+      <polygon points="-20,592 68,408 156,592" fill="#347528"/>
+      <rect x="56" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="165,592 252,328 339,592" fill="#3d8c30"/>
+      <polygon points="155,592 252,376 349,592" fill="#2a6020"/>
+      <rect x="240" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="375,592 458,346 541,592" fill="#2a6020"/>
+      <polygon points="365,592 458,392 551,592" fill="#347528"/>
+      <rect x="446" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="605,592 696,310 787,592" fill="#3d8c30"/>
+      <polygon points="595,592 696,358 797,592" fill="#2a6020"/>
+      <rect x="684" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="835,592 924,338 1013,592" fill="#2a6020"/>
+      <polygon points="825,592 924,386 1023,592" fill="#347528"/>
+      <rect x="912" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="1065,592 1154,312 1243,592" fill="#3d8c30"/>
+      <polygon points="1055,592 1154,360 1253,592" fill="#2a6020"/>
+      <rect x="1142" y="568" width="24" height="54" fill="#1c3e14"/>
+      <polygon points="1278,592 1360,342 1442,592" fill="#2a6020"/>
+      <polygon points="1268,592 1360,390 1452,592" fill="#347528"/>
+      <rect x="1348" y="568" width="24" height="54" fill="#1c3e14"/>
+    </g>
+    <!-- 덤불 -->
+    <ellipse cx="140"  cy="592" rx="58" ry="20" fill="#347528" opacity=".65"/>
+    <ellipse cx="410"  cy="592" rx="72" ry="23" fill="#3d8c30" opacity=".55"/>
+    <ellipse cx="740"  cy="592" rx="63" ry="20" fill="#347528" opacity=".65"/>
+    <ellipse cx="1040" cy="592" rx="68" ry="22" fill="#3d8c30" opacity=".55"/>
+    <ellipse cx="1340" cy="592" rx="58" ry="19" fill="#347528" opacity=".65"/>
+  </svg>
+
+  <div id="ground"></div>
+  <canvas id="cv"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hb"><div class="hl">점수</div><div class="hv" id="elScore">0</div></div>
+    <div class="hb"><div class="hl">💣 목숨</div><div id="lifeBar"><span class="lh" id="lh0">💚</span><span class="lh" id="lh1">💚</span><span class="lh" id="lh2">💚</span></div></div>
+    <div class="hb"><div class="hl">최고기록</div><div class="hv" id="elBest">0</div></div>
+  </div>
+
+  <div id="hint">← → 이동 &nbsp;|&nbsp; 🪙 동전 받기 &nbsp;💣 폭탄 3번 = 게임오버</div>
+  <div id="flash"></div>
+
+  <!-- 모바일 버튼 -->
+  <div id="mctl">
+    <div class="mb" id="mbl"><span>◀</span><span class="mbl">왼쪽</span></div>
+    <div class="mb" id="mbr"><span>▶</span><span class="mbl">오른쪽</span></div>
+  </div>
+
+  <!-- 시작 화면 -->
+  <div class="screen" id="startScreen">
+    <h1>🐰 돈먹는 토깽이</h1>
+    <p>바구니로 동전을 받아 점수를 모으세요!</p>
+    <p class="note">💣 폭탄을 3번 받으면 게임 오버 | 점수가 높을수록 빨라져요</p>
+    <div class="btn-row">
+      <button class="btn" id="btnStart">게임 시작!</button>
+      <button id="btnScore">🏆 스코어</button>
+    </div>
+  </div>
+
+  <!-- 스코어보드 화면 (메인에서 보기) -->
+  <div class="screen" id="sbScreen">
+    <h2>🏆 스코어보드</h2>
+    <table id="sbTable">
+      <thead><tr><th>순위</th><th>이름</th><th>점수</th></tr></thead>
+      <tbody id="sbBody"></tbody>
+    </table>
+    <button id="btnSbBack">← 돌아가기</button>
+  </div>
+
+  <!-- 게임오버 화면 -->
+  <div class="screen" id="overScreen">
+    <div id="overTop">
+      <h2>💥 게임 종료!</h2>
+      <div class="go-sc" id="elGoScore"></div>
+      <div class="go-bst" id="elGoBest"></div>
+    </div>
+
+    <!-- 전체 스코어보드 -->
+    <div id="overSbWrap">
+      <h3>🏆 전체 순위</h3>
+      <table id="overSbTable">
+        <thead><tr><th>순위</th><th>이름</th><th>점수</th></tr></thead>
+        <tbody id="overSbBody"></tbody>
+      </table>
+    </div>
+
+    <!-- 이니셜 입력 -->
+    <div id="initialWrap">
+      <div class="my-rank" id="myRankText"></div>
+      <p>이니셜 3글자를 입력해 등록하세요!</p>
+      <div class="initial-input-row">
+        <input class="init-char" id="ic0" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+        <input class="init-char" id="ic1" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+        <input class="init-char" id="ic2" maxlength="1" type="text" autocomplete="off" spellcheck="false"/>
+      </div>
+      <button id="btnSubmit">등록하기 ✅</button>
+    </div>
+
+    <div class="over-btn-row">
+      <button class="btn" id="btnRetry">다시 하기 🎮</button>
+    </div>
+  </div>
+</div>
+
+<script>
 'use strict';
 
 /* ─── 별 & 구름 생성 ─── */
@@ -42,17 +309,9 @@ const keys = {};
 let combo = 0, comboTimer = 0;
 // 보너스 타임
 let bonusActive = false, bonusTimer = 0;
-let lastBonusTier = 0;
+let lastBonusTier = 0;  // 이미 발동한 티어 기록
 // 기록 갱신
 let newRecord = false, recordTimer = 0;
-// 보스 스테이지
-let bossActive = false;          // 보스 진행 중
-let bossWarning = false;         // WARNING 연출 중
-let bossWarningTimer = 0;        // WARNING 표시 카운터 (프레임)
-let bossRowsLeft = 0;            // 남은 줄 수 (5줄 통과 목표)
-let bossRowTimer = 0;            // 다음 줄 스폰까지 대기
-let bossRowInterval = 120;       // 줄 간격 (프레임 기준)
-let lastBossTier = 0;            // 이미 발동한 보스 단계 (1000점 단위)
 
 /* ─── DOM 참조 ─── */
 const elScore   = document.getElementById('elScore');
@@ -67,7 +326,7 @@ const flash     = document.getElementById('flash');
 const bunny = {
   W: 54, H: 70,
   x: 0,  y: 0,
-  spd: 9,   // 토끼 이동속도 상향 (7→9)
+  spd: 7,
   dir: 1,
   legT: 0,
   earT: 0,
@@ -97,20 +356,18 @@ const COINS = [
 function spawnItem() {
   const x = 50 + Math.random() * (W - 100);
 
-  // 점수 기반 난이도 — 상한 없이 계속 빨라짐
-  //  0점 : spd=3.8  (초반부터 확실히 빠른 체감)
-  //  300점: spd=5.0
-  //  600점: spd=6.2
-  // 1000점: spd=7.6+
-  const spd   = 3.8 + (score / 300) * 1.2;
-  const bombP = 0.08 + Math.min(score / 500, 1) * 0.20;
+  // ── 점수 기반 난이도 (상한 없이 계속 증가)
+  const phase1 = Math.min(score, 500) / 500;
+  const phase2 = Math.min(Math.max(score - 500, 0), 500) / 500;
+  const spd    = 2.0 + phase1 * 2.5 + phase2 * 1.5;  // 2.0 → 4.5 → 6.0
+  const bombP  = 0.08 + phase1 * 0.20;               // 8% → 28%
 
-  // 보너스 타임: 10원짜리만, 현재 속도 기반으로 빠르게
+  // 보너스 타임: 10원짜리만, 현재 spd 기반 빠른 속도
   if (bonusActive) {
     const c = COINS[2];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: spd * 1.5 + Math.random() * 1.0,
+      vy: spd * 1.6 + Math.random() * 1.5,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
@@ -118,58 +375,38 @@ function spawnItem() {
     return;
   }
 
-  // 목숨 아이템
+  // 목숨 아이템 (100점 이상, 목숨 부족 시 10% 확률)
   if (score >= 100 && lives < 3 && Math.random() < 0.10) {
-    items.push({ kind: 'life', x, y: -20, r: 16, vy: spd * 0.75, spin: 0 });
+    items.push({ kind: 'life', x, y: -20, r: 16, vy: spd * 0.8 + Math.random() * 0.5, spin: 0 });
     return;
   }
 
   if (Math.random() < bombP) {
-    items.push({ kind: 'bomb', x, y: -28, r: 20, vy: spd + Math.random() * 0.6, rot: 0 });
+    items.push({
+      kind: 'bomb', x, y: -28, r: 20,
+      vy: (spd + Math.random() * 0.8), rot: 0
+    });
   } else {
     // 동전 순차 등장: 1점 → 5점 → 10점
     let coinIdx;
     const r = Math.random();
-    if (score < 60)       coinIdx = 0;
-    else if (score < 150) coinIdx = r < 0.70 ? 0 : 1;
-    else if (score < 300) coinIdx = r < 0.45 ? 0 : 1;
-    else                  coinIdx = r < 0.30 ? 0 : r < 0.60 ? 1 : 2;
+    if (score < 60) {
+      coinIdx = 0;
+    } else if (score < 150) {
+      coinIdx = r < 0.70 ? 0 : 1;
+    } else if (score < 300) {
+      coinIdx = r < 0.45 ? 0 : 1;
+    } else {
+      coinIdx = r < 0.30 ? 0 : r < 0.60 ? 1 : 2;
+    }
     const c = COINS[coinIdx];
     items.push({
       kind: 'coin', x, y: -20, r: c.r,
-      vy: spd + Math.random() * 0.6,
+      vy: spd + Math.random() * 0.8,
       spin: Math.random() * Math.PI * 2,
       spinV: 0.05 + Math.random() * 0.04,
       value: c.value, col: c.col, shine: c.shine
     });
-  }
-}
-
-/* ─── 보스 줄(row) 스폰 ─── */
-function spawnBossRow() {
-  // 5칸으로 분할 → 각 칸 너비가 충분히 넓어져서 통과 가능
-  const SLOTS = 5;
-  const coinSlot = Math.floor(Math.random() * SLOTS);
-  const slotW = W / SLOTS;
-  const spd = 3.5 + (score / 300) * 1.2; // 보스 줄 속도
-
-  for (let i = 0; i < SLOTS; i++) {
-    const cx = slotW * i + slotW / 2;
-    if (i === coinSlot) {
-      // 동전 슬롯: 10점짜리 동전 1개 (크기 그대로)
-      const c = COINS[2];
-      items.push({
-        kind: 'coin', x: cx, y: -24, r: c.r,
-        vy: spd,
-        spin: Math.random() * Math.PI * 2,
-        spinV: 0.06,
-        value: c.value, col: c.col, shine: c.shine,
-        isBossRow: true
-      });
-    } else {
-      // 폭탄: 반지름을 14로 줄여서 통과 틈새 확보
-      items.push({ kind: 'bomb', x: cx, y: -28, r: 14, vy: spd, rot: 0, isBossRow: true });
-    }
   }
 }
 
@@ -250,66 +487,22 @@ function update(dt) {
     bonusTimer -= 1;
     if (bonusTimer <= 0) {
       bonusActive = false;
-      combo = 0; comboTimer = 0;
+      combo = 0; comboTimer = 0; // 보너스 끝나면 콤보 리셋 → 새로 20콤보 도전
       stopBonusBgm();
     }
   }
 
-  // ── 보스 스테이지 체크 (1000점 단위)
-  const bossTier = Math.floor(score / 1000);
-  if (!bossActive && !bossWarning && !bonusActive && bossTier > lastBossTier) {
-    lastBossTier = bossTier;
-    bossWarning = true;
-    bossWarningTimer = 180; // 3초 WARNING 연출
-    items = []; // 화면 초기화
-    spawnT = 9999; // 일반 스폰 잠시 차단
-  }
-
-  // WARNING 연출 카운트다운
-  if (bossWarning) {
-    bossWarningTimer--;
-    if (bossWarningTimer <= 0) {
-      bossWarning = false;
-      bossActive = true;
-      bossRowsLeft = 5;
-      bossRowTimer = 0;
-    }
-  }
-
-  // 보스 스테이지 진행
-  if (bossActive) {
-    bossRowTimer--;
-    if (bossRowTimer <= 0) {
-      if (bossRowsLeft > 0) {
-        spawnBossRow();
-        bossRowsLeft--;
-        bossRowTimer = bossRowInterval;
-      }
-    }
-
-    // 보스 줄 아이템이 전부 화면 밖으로 나가면 종료 판단
-    const bossItems = items.filter(it => it.isBossRow);
-    if (bossRowsLeft === 0 && bossItems.length === 0) {
-      bossActive = false;
-      addPop(W / 2, H / 2, '🎉 보스 클리어!', '#00ffcc');
-      addPop(W / 2, H / 2 + 44, '+50 보너스!', '#ffe066');
-      score += 50;
-      elScore.textContent = score;
-    }
-  }
-
-  // 스폰 — 보스/워닝 중에는 일반 아이템 스폰 차단
+  // 스폰
+  spawnT += dt;
   elapsed += dt / 1000;
-  if (!bossActive && !bossWarning) {
-    spawnT += dt;
-    const spawnInterval = bonusActive
-      ? 180
-      : Math.max(320, 1100 - score * 1.8);
-    if (spawnT >= spawnInterval) {
-      spawnItem();
-      if (bonusActive) spawnItem();
-      spawnT = 0;
-    }
+  // 점수가 높을수록 스폰 간격 짧아짐: 0점=1.4초 → 500점=0.55초
+  const spawnInterval = bonusActive
+    ? 220
+    : Math.max(380, 1300 - score * 1.8);
+  if (spawnT >= spawnInterval) {
+    spawnItem();
+    if (bonusActive) spawnItem();
+    spawnT = 0;
   }
 
   // 아이템 충돌
@@ -324,13 +517,8 @@ function update(dt) {
         sfxCoin();
         bunny.face = 'happy'; bunny.faceTimer = 50;
 
-        // 보스 줄 동전 받으면 같은 줄 폭탄 모두 제거
-        if (it.isBossRow) {
-          items = items.filter(b => !(b.isBossRow && b.kind === 'bomb' && Math.abs(b.y - it.y) < 60));
-        }
-
-        // 콤보 — 보너스·보스 타임 중에는 콤보 누적 제외
-        if (!bonusActive && !bossActive) {
+        // 콤보 — 보너스 타임 중에는 콤보 누적 제외
+        if (!bonusActive) {
           combo++;
           comboTimer = 180;
           if (combo > 0 && combo % 10 === 0) {
@@ -345,13 +533,6 @@ function update(dt) {
       } else if (it.kind === 'bomb') {
         lives--;
         combo = 0; comboTimer = 0; lastBonusTier = 0;
-        // 보스 줄 폭탄 맞으면 해당 줄 전체 제거 후 보스 재도전
-        if (it.isBossRow) {
-          items = items.filter(b => !(b.isBossRow && Math.abs(b.y - it.y) < 60));
-          if (bossRowsLeft === 0 && lives > 0) {
-            // 이미 모든 줄 소화 중이었으면 패스
-          }
-        }
         refreshLives();
         doFlash();
         addSparks(it.x, it.y, '#ff5500', 20);
@@ -429,6 +610,8 @@ function draw() {
     ctx.fillStyle = col;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
+
+    // 보너스 타임 문구
     const pulse = 1 + Math.sin(t * 0.008) * 0.06;
     ctx.save();
     ctx.translate(W / 2, 90);
@@ -438,55 +621,6 @@ function draw() {
     ctx.fillStyle = col;
     ctx.shadowColor = col; ctx.shadowBlur = 18;
     ctx.fillText('🎉 보너스 타임!', 0, 0);
-    ctx.shadowBlur = 0;
-    ctx.restore();
-  }
-
-  // ── WARNING 연출
-  if (bossWarning) {
-    const t = Date.now();
-    const flash2 = Math.floor(t / 200) % 2 === 0;
-    ctx.fillStyle = flash2 ? 'rgba(180,0,0,0.35)' : 'rgba(0,0,0,0.2)';
-    ctx.fillRect(0, 0, W, H);
-
-    const pulse = 1 + Math.sin(t * 0.015) * 0.08;
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.scale(pulse, pulse);
-    ctx.font = `bold ${Math.min(W * 0.14, 90)}px Jua, cursive`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = flash2 ? '#ff2222' : '#ff8888';
-    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 40;
-    ctx.fillText('⚠️ WARNING ⚠️', 0, 0);
-    ctx.shadowBlur = 0;
-    ctx.font = `bold ${Math.min(W * 0.06, 36)}px Jua, cursive`;
-    ctx.fillStyle = '#fff';
-    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 12;
-    ctx.fillText('보스 스테이지 시작!', 0, 60);
-    ctx.shadowBlur = 0;
-    ctx.restore();
-  }
-
-  // ── 보스 스테이지 진행 중 UI (남은 줄 표시)
-  if (bossActive) {
-    const t = Date.now();
-    ctx.save();
-    ctx.fillStyle = 'rgba(120,0,0,0.18)';
-    ctx.fillRect(0, 0, W, H);
-
-    // 상단 진행 바
-    const total = 5;
-    const cleared = total - bossRowsLeft;
-    const barW = Math.min(W * 0.5, 300);
-    const barX = W / 2 - barW / 2;
-    const barY = 75;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.beginPath(); ctx.arc(W/2, 90, barW/2 + 18, 0, Math.PI*2); ctx.fill();
-    ctx.font = 'bold 16px Jua, cursive';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ff4444';
-    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 10;
-    ctx.fillText(`👾 보스 스테이지   ${cleared} / ${total}`, W / 2, 90);
     ctx.shadowBlur = 0;
     ctx.restore();
   }
@@ -1076,8 +1210,6 @@ function startGame() {
   combo = 0; comboTimer = 0;
   bonusActive = false; bonusTimer = 0; lastBonusTier = 0;
   newRecord = false; recordTimer = 0;
-  bossActive = false; bossWarning = false; bossWarningTimer = 0;
-  bossRowsLeft = 0; bossRowTimer = 0; lastBossTier = 0;
   stopBonusBgm();
   elScore.textContent = '0';
   refreshLives();
@@ -1251,3 +1383,6 @@ mbr.addEventListener('touchstart', e => { e.preventDefault(); keys.right = true;
 mbr.addEventListener('touchend',   e => { e.preventDefault(); keys.right = false; });
 
 requestAnimationFrame(loop);
+</script>
+</body>
+</html>
